@@ -1,6 +1,7 @@
 package io.github.mangi.flymefreeform.platform.coloros
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeNotNull
 import org.junit.Test
 import org.luckypray.dexkit.DexKitBridge
@@ -15,12 +16,17 @@ class LauncherDexQueryTest {
         System.load(nativeLibrary!!)
         val symbols = DexKitBridge.create(apk!!).use { bridge ->
             bridge.setThreadNum(1)
+            val workspace = bridge.getClassData(ColorOsLauncherWorkspaceTarget.WORKSPACE_CLASS)
+                ?: error("LAUNCHER_WORKSPACE_CLASS_MISSING")
+            val methods = workspace.methods
+            val expectedDescriptors = setOf(
+                "Lcom/android/launcher3/OplusWorkspace;->dispatchTouchEvent(Landroid/view/MotionEvent;)Z",
+                "Lcom/android/launcher3/OplusWorkspace;->determineScrollingStart(Landroid/view/MotionEvent;F)V",
+                "Lcom/android/launcher3/OplusWorkspace;->determineScrollingStart(Landroid/view/MotionEvent;FZ)V",
+            )
+            assertTrue(methods.map { it.descriptor }.containsAll(expectedDescriptors))
             LauncherDexQuery.find(bridge)
         }
-        assertEquals(
-            expected,
-            listOf(symbols.inputMethod, symbols.monitorField, symbols.wrapperClass, symbols.pilferMethod)
-                .joinToString(","),
-        )
+        assertEquals(expected, listOf(symbols.inputMethod, symbols.interceptMethod, symbols.releaseMethod).joinToString(","))
     }
 }

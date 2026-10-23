@@ -21,9 +21,12 @@ import io.github.mangi.flymefreeform.gesture.AdaptiveCornerGestureConfig
 import io.github.mangi.flymefreeform.gesture.CornerGestureConfig
 import io.github.mangi.flymefreeform.gesture.CornerGestureEngine
 import io.github.mangi.flymefreeform.gesture.CornerSide
+import io.github.mangi.flymefreeform.gesture.CornerStreamIdentity
+import io.github.mangi.flymefreeform.gesture.CornerStreamTracker
 import io.github.mangi.flymefreeform.gesture.CornerTriggerRegion
 import io.github.mangi.flymefreeform.gesture.GestureAction
 import io.github.mangi.flymefreeform.gesture.GesturePhase
+import io.github.mangi.flymefreeform.platform.coloros.ColorOsInputEventDisplay
 import java.lang.reflect.Field
 import java.lang.reflect.Method
 
@@ -66,7 +69,30 @@ internal class SystemUiCornerInputMonitor(
     private var pendingSettings: ModuleSettingsSnapshot? = null
     private var lastPilferFailureAt = -PILFER_FAILURE_LOG_INTERVAL_MS
 
+    private val inputClient: SystemUiCornerInputClient = SystemUiCornerInputClient(
+        context, mainHandler,
+        log = { priority, code, error -> module.log(priority, TAG, code, error) },
+        onDisconnected = {
+            bindings.values.forEach { it.view.cancelStream() }
+            availabilityPublisher.publish()
+        },
+        onReady = { availabilityPublisher.publish() },
+    )
+    private val availabilityPublisher: CornerInputAvailabilityPublisher by lazy {
+        CornerInputAvailabilityPublisher(
+            context, isReady = ::isOwnerReady,
+            report = { code, error -> module.log(Log.WARN, TAG, code, error) },
+        )
+    }
+    private var feedbackHook: SystemUiNavigationFeedbackHook? = null
+
     fun start() {
+        check(ColorOsInputEventDisplay.isAvailable) { "Input event display unavailable" }
+        availabilityPublisher.start()
+        inputClient.start()
+        feedbackHook = SystemUiNavigationFeedbackHook(context, module, configuration) { side ->
+            bindings.containsKey(side) && canClaim(side)
+        }.also { it.install(context.classLoader) }
         environmentState.start(context)
         environmentState.observe { applySettings(configuration.snapshot) }
         configuration.observe { snapshot ->
@@ -94,6 +120,7 @@ internal class SystemUiCornerInputMonitor(
         val allowed = environmentState.isGestureAllowed(refreshKeyguard = true)
         updateSide(CornerSide.Left, allowed && snapshot.leftCornerEnabled)
         updateSide(CornerSide.Right, allowed && snapshot.rightCornerEnabled)
+        availabilityPublisher.publish()
     }
 
     private fun updateSide(side: CornerSide, shouldExist: Boolean) {
@@ -135,6 +162,11 @@ internal class SystemUiCornerInputMonitor(
                 rangeDp = settings.cornerTriggerRangeDp,
                 canClaim = { canClaim(side) },
                 pilfer = ::pilfer,
+                client = inputClient,
+                releaseUnclaimed = { identity ->
+                    feedbackHook?.releaseUnclaimed(identity)
+                    availabilityPublisher.releaseCandidate(identity)
+                },
                 onStreamFinished = ::finishStream,
             )
         try {
@@ -159,8 +191,13 @@ internal class SystemUiCornerInputMonitor(
         }
     }
 
+    private fun isOwnerReady(): Boolean =
+        inputClient.isReady && settings.enabled && bindings.isNotEmpty() &&
+            (!settings.leftCornerEnabled || bindings.containsKey(CornerSide.Left)) &&
+            (!settings.rightCornerEnabled || bindings.containsKey(CornerSide.Right))
+
     private fun canClaim(side: CornerSide): Boolean =
-        settings.enabled &&
+        isOwnerReady() &&
             when (side) {
                 CornerSide.Left -> settings.leftCornerEnabled
                 CornerSide.Right -> settings.rightCornerEnabled
@@ -241,18 +278,26 @@ internal class SystemUiCornerInputMonitor(
         var rangeDp: Int,
         private val canClaim: () -> Boolean,
         private val pilfer: (View) -> Boolean,
+        private val client: SystemUiCornerInputClient,
+        private val releaseUnclaimed: (CornerStreamIdentity) -> Unit,
         private val onStreamFinished: () -> Unit,
     ) : View(context) {
-        private val gestureEngine = CornerGestureEngine()
+        private val engine = CornerGestureEngine()
+        private val stream = CornerStreamTracker()
         private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop.toFloat()
         private val density = context.resources.displayMetrics.density
-        private var activeConfig: CornerGestureConfig? = null
-        private var activePointerId = -1
+        private var config: CornerGestureConfig? = null
+        private var pointerId = -1
+        private var session = 0L
+        private var generation = 0L
+        private var prepared = false
+        private var activated = false
         private var tracking = false
-        private var pilferAttempted = false
+        private var latestX = 0f
+        private var latestY = 0f
+        private var latestTime = 0L
 
-        val streamActive: Boolean
-            get() = tracking
+        val streamActive: Boolean get() = tracking
 
         init {
             importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
@@ -260,101 +305,124 @@ internal class SystemUiCornerInputMonitor(
         }
 
         override fun onTouchEvent(event: MotionEvent): Boolean {
-            if (!event.isFromSource(InputDevice.SOURCE_TOUCHSCREEN)) {
-                val wasActive = tracking
+            if (!event.isFromSource(InputDevice.SOURCE_TOUCHSCREEN) || ColorOsInputEventDisplay.read(event) != 0) {
                 resetTracking()
-                if (wasActive) onStreamFinished()
+                onStreamFinished()
                 return true
             }
-
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
-                    resetTracking()
-                    val eligible =
-                        event.pointerCount == 1 &&
-                            event.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER &&
-                            canClaim() &&
-                            CornerTriggerRegion.detectSide(
-                                x = event.x,
-                                y = event.y,
-                                displayWidth = width.toFloat(),
-                                displayHeight = height.toFloat(),
-                                radius = rangePx,
-                                leftEnabled = side == CornerSide.Left,
-                                rightEnabled = side == CornerSide.Right,
-                            ) == side
-                    if (eligible) {
-                        val config =
-                            AdaptiveCornerGestureConfig.create(
-                                displayWidth = width.toFloat(),
-                                displayHeight = height.toFloat(),
-                                touchSlop = touchSlop,
-                                density = density,
-                                triggerRangeDp = rangeDp,
-                                leftEnabled = side == CornerSide.Left,
-                                rightEnabled = side == CornerSide.Right,
-                            )
-                        activePointerId = event.getPointerId(0)
-                        gestureEngine.down(activePointerId, event.x, event.y, config)
-                        if (gestureEngine.phase == GesturePhase.Armed) {
-                            activeConfig = config
-                            tracking = true
-                        }
+                    val previousIdentity = stream.identity
+                    if (!stream.begin(event.deviceId, ColorOsInputEventDisplay.read(event), event.getPointerId(0),
+                            event.eventTime, event.rawX, event.rawY)) return true
+                    cancelStream(previousIdentity)
+                    client.requestConnection()
+                    if (event.pointerCount != 1 || event.getToolType(0) != MotionEvent.TOOL_TYPE_FINGER || !canClaim()) {
+                        stream.identity?.let(releaseUnclaimed)
+                        return true
                     }
-                }
-
-                MotionEvent.ACTION_MOVE -> {
-                    if (tracking) {
-                        if (!canClaim()) {
-                            resetTracking()
+                    val metrics = context.resources.displayMetrics
+                    val candidate = AdaptiveCornerGestureConfig.create(
+                        metrics.widthPixels.toFloat(), metrics.heightPixels.toFloat(), touchSlop,
+                        density, rangeDp, side == CornerSide.Left, side == CornerSide.Right,
+                    )
+                    pointerId = event.getPointerId(0)
+                    engine.down(pointerId, event.rawX, event.rawY, candidate, event.eventTime)
+                    if (engine.phase != GesturePhase.Armed) {
+                        stream.identity?.let(releaseUnclaimed)
+                        return true
+                    }
+                    config = candidate
+                    latestX = event.rawX
+                    latestY = event.rawY
+                    latestTime = event.eventTime
+                    tracking = true
+                    val currentGeneration = ++generation
+                    session = client.begin(latestX, latestY) { allowed ->
+                        if (!tracking || generation != currentGeneration) return@begin
+                        if (!allowed) {
+                            cancelStream()
                             onStreamFinished()
-                            return true
-                        }
-                        val config = activeConfig
-                        val pointerIndex = event.findPointerIndex(activePointerId)
-                        val action =
-                            if (config != null && pointerIndex >= 0) {
-                                gestureEngine.move(
-                                    pointerId = activePointerId,
-                                    pointerCount = event.pointerCount,
-                                    x = event.getX(pointerIndex),
-                                    y = event.getY(pointerIndex),
-                                    config = config,
-                                )
-                            } else {
-                                gestureEngine.cancel()
-                            }
-                        if (!pilferAttempted && action is GestureAction.Activate) {
-                            pilferAttempted = true
-                            pilfer(this)
+                        } else {
+                            prepared = true
+                            tryActivate()
                         }
                     }
+                    if (session == 0L) cancelStream()
                 }
-
-                MotionEvent.ACTION_POINTER_DOWN -> {
-                    if (tracking) gestureEngine.cancel()
+                MotionEvent.ACTION_MOVE -> {
+                    if (!tracking) return true
+                    if (!canClaim() || !stream.matches(event.deviceId, ColorOsInputEventDisplay.read(event))) {
+                        cancelStream()
+                        onStreamFinished()
+                        return true
+                    }
+                    val index = event.findPointerIndex(pointerId)
+                    val current = config
+                    if (index < 0 || current == null) {
+                        cancelStream()
+                        onStreamFinished()
+                        return true
+                    }
+                    latestX = event.getRawX(index)
+                    latestY = event.getRawY(index)
+                    latestTime = event.eventTime
+                    when (engine.move(pointerId, event.pointerCount, latestX, latestY, current, latestTime)) {
+                        is GestureAction.Activate -> tryActivate()
+                        is GestureAction.Update -> {
+                            if (!activated) tryActivate()
+                            if (activated) client.move(session, latestX, latestY, latestTime)
+                        }
+                        GestureAction.Cancel -> { cancelStream(); onStreamFinished() }
+                        else -> if (engine.phase == GesturePhase.Yielded) { cancelStream(); onStreamFinished() }
+                    }
                 }
-
-                MotionEvent.ACTION_UP,
-                MotionEvent.ACTION_CANCEL -> {
-                    if (event.actionMasked == MotionEvent.ACTION_UP && tracking) {
-                        gestureEngine.up(event.getPointerId(event.actionIndex))
+                MotionEvent.ACTION_POINTER_DOWN -> { cancelStream(); onStreamFinished() }
+                MotionEvent.ACTION_UP -> {
+                    if (tracking && activated && canClaim() && event.getPointerId(event.actionIndex) == pointerId) {
+                        client.finish(session, event.rawX, event.rawY, event.eventTime)
+                        session = 0L
                     }
                     resetTracking()
                     onStreamFinished()
                 }
-
-                else -> Unit
+                MotionEvent.ACTION_CANCEL -> { resetTracking(); onStreamFinished() }
             }
             return true
         }
 
-        fun resetTracking() {
-            gestureEngine.cancel()
-            activeConfig = null
-            activePointerId = -1
+        private fun tryActivate() {
+            if (!tracking || activated || !prepared || !engine.isClaimed || !canClaim()) return
+            // 只允许这个输入窗口提出抢占；反射调用完成不等于 native 层已确认成功。
+            if (!pilfer(this)) {
+                cancelStream()
+                onStreamFinished()
+                return
+            }
+            activated = true
+            if (!client.activate(session, latestX, latestY, latestTime)) {
+                cancelStream()
+                onStreamFinished()
+            }
+        }
+
+        fun cancelStream(identity: CornerStreamIdentity? = stream.identity) {
+            if (tracking && !activated) identity?.let(releaseUnclaimed)
+            generation++
+            val id = session
+            session = 0L
             tracking = false
-            pilferAttempted = false
+            activated = false
+            prepared = false
+            config = null
+            pointerId = -1
+            engine.cancel()
+            if (id != 0L) client.cancel(id)
+        }
+
+        fun resetTracking() {
+            cancelStream()
+            stream.finish()
         }
     }
 

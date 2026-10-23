@@ -10,6 +10,7 @@ internal enum class CornerSide {
 internal enum class GesturePhase {
     Idle,
     Armed,
+    Yielded,
     Revealing,
     Selecting,
     Committing,
@@ -86,13 +87,21 @@ internal class CornerGestureEngine {
     private var originY = 0f
     private var side: CornerSide? = null
     private var claimed = false
+    private var downTimeMillis = 0L
 
-    fun down(pointerId: Int, x: Float, y: Float, config: CornerGestureConfig): GestureAction {
+    fun down(
+        pointerId: Int,
+        x: Float,
+        y: Float,
+        config: CornerGestureConfig,
+        eventTimeMillis: Long,
+    ): GestureAction {
         reset()
         val detectedSide = detectSide(x, y, config) ?: return GestureAction.PassThrough
         this.pointerId = pointerId
         originX = x
         originY = y
+        downTimeMillis = eventTimeMillis
         side = detectedSide
         phase = GesturePhase.Armed
         return GestureAction.PassThrough
@@ -104,16 +113,20 @@ internal class CornerGestureEngine {
         x: Float,
         y: Float,
         config: CornerGestureConfig,
+        eventTimeMillis: Long,
     ): GestureAction {
         val activeSide = side ?: return GestureAction.PassThrough
-        if (pointerId != this.pointerId || pointerCount != 1) return cancel()
+        if (pointerId != this.pointerId || pointerCount != 1 || !x.isFinite() || !y.isFinite()) {
+            return reject()
+        }
 
         val inward = if (activeSide == CornerSide.Left) x - originX else originX - x
         val upward = originY - y
         if (inward < -config.reverseTolerance || upward < -config.reverseTolerance) {
-            return cancel()
+            return reject()
         }
         if (!claimed) {
+            if (eventTimeMillis < downTimeMillis) return reject()
             if (inward < config.inwardThreshold || upward < config.upwardThreshold) {
                 return GestureAction.PassThrough
             }
@@ -151,6 +164,12 @@ internal class CornerGestureEngine {
     val isClaimed: Boolean
         get() = claimed
 
+    private fun reject(): GestureAction {
+        if (claimed) return cancel()
+        clearTracking(GesturePhase.Yielded)
+        return GestureAction.PassThrough
+    }
+
     private fun detectSide(x: Float, y: Float, config: CornerGestureConfig): CornerSide? {
         return CornerTriggerRegion.detectSide(
             x = x,
@@ -175,5 +194,6 @@ internal class CornerGestureEngine {
         originY = 0f
         side = null
         claimed = false
+        downTimeMillis = 0L
     }
 }

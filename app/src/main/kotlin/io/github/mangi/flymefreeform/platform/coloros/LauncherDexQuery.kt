@@ -1,21 +1,18 @@
 package io.github.mangi.flymefreeform.platform.coloros
 
-import java.io.InterruptedIOException
 import java.lang.reflect.Modifier
 import org.luckypray.dexkit.DexKitBridge
-import org.luckypray.dexkit.result.FieldUsingType
 
-/** 桌面输入适配的字节码证据；查询结果不持有 native bridge 或宿主对象。 */
+/** 同时定位消费入口和宿主缓存触摸的放行能力，避免候选等待系统无移动超时。 */
 internal object LauncherDexQuery {
     const val SERVICE_CLASS = "com.android.quickstep.OplusBaseTouchInteractionService"
-    const val INPUT_MONITOR_CLASS = "android.view.InputMonitor"
-    const val RULE_VERSION = "launcher-input-v1-dexkit-2.3.0"
+    const val INTERCEPT_CLASS = "com.oplus.quickstep.gesture.helper.OplusInputInterceptHelper"
+    const val RULE_VERSION = "launcher-input-release-v4-dexkit-2.3.0"
 
     data class Symbols(
         val inputMethod: String,
-        val monitorField: String,
-        val wrapperClass: String,
-        val pilferMethod: String,
+        val interceptMethod: String,
+        val releaseMethod: String,
     )
 
     fun find(bridge: DexKitBridge): Symbols {
@@ -23,37 +20,32 @@ internal object LauncherDexQuery {
             ?: throw NoSuchMethodException("LAUNCHER_DEX_SERVICE_MISSING")
         val input = service.methods.findMethod {
             matcher {
-                paramTypes("android.view.InputEvent")
+                paramTypes("android.view.MotionEvent")
                 returnType = "void"
-                usingEqStrings("Unknown event ", "onInputEvent(), mDeviceState user is not unlocked")
+                usingEqStrings("onDispatchInputEvent: ", "TouchInteractionService.onInputEvent")
                 addInvoke("Landroid/view/MotionEvent;->getActionMasked()I")
             }
         }.filter { !Modifier.isStatic(it.modifiers) }
             .singleOrNull() ?: throw NoSuchMethodException("LAUNCHER_DEX_INPUT_NOT_UNIQUE")
 
-        // 从宿主字段类型向下定位真实抢占调用，排除同签名的空 pilferPointers 方法。
-        val candidates = service.fields.filter { !Modifier.isStatic(it.modifiers) }.mapNotNull { owner ->
-            if (Thread.currentThread().isInterrupted) throw InterruptedIOException("LAUNCHER_DEX_CANCELLED")
-            val wrapper = owner.type
-            val delegates = wrapper.fields.filter {
-                it.typeName == INPUT_MONITOR_CLASS && !Modifier.isStatic(it.modifiers)
+        val interceptor = bridge.getClassData(INTERCEPT_CLASS)
+            ?: throw NoSuchMethodException("LAUNCHER_INPUT_INTERCEPT_CLASS_MISSING")
+        val intercept = interceptor.methods.findMethod {
+            matcher {
+                paramTypes("android.view.MotionEvent", "boolean", "java.lang.Float", "boolean", "boolean", null, "java.lang.String")
+                returnType = "boolean"
+                usingEqStrings("interceptAndInjectMotionEvent, gestureState is SWIPE_FAIL")
             }
-            if (delegates.size != 1) return@mapNotNull null
-            val delegate = delegates.single()
-            val pilfer = wrapper.methods.findMethod {
-                matcher {
-                    paramTypes()
-                    returnType = "void"
-                    addInvoke("Landroid/view/InputMonitor;->pilferPointers()V")
-                }
-            }.filter { method ->
-                !Modifier.isStatic(method.modifiers) && method.usingFields.any {
-                    it.usingType == FieldUsingType.Read && it.field.descriptor == delegate.descriptor
-                }
-            }.singleOrNull() ?: return@mapNotNull null
-            Symbols(input.name, owner.name, owner.typeName, pilfer.name)
-        }
-        return candidates.singleOrNull()
-            ?: throw NoSuchFieldException("LAUNCHER_DEX_MONITOR_NOT_UNIQUE")
+        }.filter { !Modifier.isStatic(it.modifiers) }.singleOrNull()
+            ?: throw NoSuchMethodException("LAUNCHER_INPUT_INTERCEPT_NOT_UNIQUE")
+        val release = interceptor.methods.findMethod {
+            matcher {
+                paramTypes("boolean")
+                returnType = "void"
+                usingEqStrings("injectAllEvent: down no need inject, not in InterceptRegion")
+            }
+        }.filter { !Modifier.isStatic(it.modifiers) }.singleOrNull()
+            ?: throw NoSuchMethodException("LAUNCHER_INPUT_RELEASE_NOT_UNIQUE")
+        return Symbols(input.name, intercept.name, release.name)
     }
 }

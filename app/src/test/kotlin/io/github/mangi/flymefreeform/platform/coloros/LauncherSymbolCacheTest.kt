@@ -9,7 +9,7 @@ import org.junit.rules.TemporaryFolder
 
 class LauncherSymbolCacheTest {
     @get:Rule val temporary = TemporaryFolder()
-    private val symbols = LauncherDexQuery.Symbols("input", "monitor", "example.Wrapper", "claim")
+    private val symbols = LauncherDexQuery.Symbols("input", "intercept", "release")
 
     @Test fun apkReplacementWithSameSizeAndTimestampInvalidatesCache() {
         val apk = temporary.newFile("host.apk").apply { writeText("first") }
@@ -27,7 +27,11 @@ class LauncherSymbolCacheTest {
 
     @Test fun corruptIncompleteAndOversizedCachesAreRejected() {
         val cache = temporary.newFile("symbols")
-        for (text in listOf("id\ninput", "id\ninput\nmonitor\nexample.Wrapper\nclaim()", "x".repeat(4097))) {
+        val invalid = listOf(
+            "id", "id\ninput()", "id\nexample.input",
+            "id\ninput\nmonitor\nexample.Wrapper\nclaim", "x".repeat(4097),
+        )
+        for (text in invalid) {
             cache.writeText(text)
             assertNull(LauncherSymbolCache.read(cache, "id"))
         }

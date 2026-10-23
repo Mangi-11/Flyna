@@ -2,18 +2,17 @@ package io.github.mangi.flymefreeform.platform.coloros
 
 import android.annotation.SuppressLint
 import android.content.Context
-import android.view.InputEvent
+import android.view.MotionEvent
 import java.io.File
 import java.io.IOException
-import java.lang.reflect.Field
 import java.lang.reflect.Method
 import java.lang.reflect.Modifier
 import org.luckypray.dexkit.DexKitBridge
 
 internal data class ColorOsLauncherInputTarget(
     val inputMethod: Method,
-    val monitorField: Field,
-    val pilferMethod: Method,
+    val interceptMethod: Method,
+    val releaseMethod: Method,
 ) {
     companion object {
         /** 仅在桌面后台初始化期间调用。缓存命中不加载 native 库，失败后只重新解析一次。 */
@@ -54,24 +53,28 @@ internal data class ColorOsLauncherInputTarget(
             return target
         }
 
-        // InputMonitor 属于桌面持有的隐藏类型；下方校验字段和方法签名，失败交由安装层回退。
+        // 只定位输入分发，不取得桌面的 InputMonitor 或抢占入口。
         @SuppressLint("PrivateApi")
         private fun bind(loader: ClassLoader, symbols: LauncherDexQuery.Symbols): ColorOsLauncherInputTarget {
             val service = loader.loadClass(LauncherDexQuery.SERVICE_CLASS)
             require(Context::class.java.isAssignableFrom(service))
-            val input = service.getDeclaredMethod(symbols.inputMethod, InputEvent::class.java)
+            val input = service.getDeclaredMethod(symbols.inputMethod, MotionEvent::class.java)
             require(input.returnType == Void.TYPE && !Modifier.isStatic(input.modifiers))
-            val owner = service.getDeclaredField(symbols.monitorField)
-            require(owner.type.name == symbols.wrapperClass && !Modifier.isStatic(owner.modifiers))
-            require(owner.type.declaredFields.count {
-                it.type.name == LauncherDexQuery.INPUT_MONITOR_CLASS && !Modifier.isStatic(it.modifiers)
-            } == 1)
-            val pilfer = owner.type.getDeclaredMethod(symbols.pilferMethod)
-            require(pilfer.returnType == Void.TYPE && !Modifier.isStatic(pilfer.modifiers))
             input.isAccessible = true
-            owner.isAccessible = true
-            pilfer.isAccessible = true
-            return ColorOsLauncherInputTarget(input, owner, pilfer)
+            val helper = loader.loadClass(LauncherDexQuery.INTERCEPT_CLASS)
+            val intercept = helper.declaredMethods.singleOrNull { method ->
+                val types = method.parameterTypes
+                method.name == symbols.interceptMethod && method.returnType == Boolean::class.javaPrimitiveType &&
+                    !Modifier.isStatic(method.modifiers) && types.size == 7 &&
+                    types[0] == MotionEvent::class.java && types[1] == Boolean::class.javaPrimitiveType &&
+                    types[2] == java.lang.Float::class.java && types[3] == Boolean::class.javaPrimitiveType &&
+                    types[4] == Boolean::class.javaPrimitiveType && !types[5].isPrimitive && types[6] == String::class.java
+            } ?: throw NoSuchMethodException("Input interception signature mismatch")
+            val release = helper.getDeclaredMethod(symbols.releaseMethod, Boolean::class.javaPrimitiveType)
+            require(release.returnType == Void.TYPE && !Modifier.isStatic(release.modifiers))
+            intercept.isAccessible = true
+            release.isAccessible = true
+            return ColorOsLauncherInputTarget(input, intercept, release)
         }
     }
 }

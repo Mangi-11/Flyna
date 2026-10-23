@@ -10,9 +10,9 @@ internal object LauncherSymbolCache {
     fun read(file: File, identity: String): LauncherDexQuery.Symbols? {
         if (!file.isFile || file.length() > 4096) return null
         val lines = file.readLines()
-        if (lines.size != 5 || lines[0] != identity) return null
-        if (lines.drop(1).any { !it.matches(Regex("[A-Za-z_$][A-Za-z0-9_$.]*")) }) return null
-        return LauncherDexQuery.Symbols(lines[1], lines[2], lines[3], lines[4])
+        if (lines.size != 4 || lines[0] != identity) return null
+        if (lines.drop(1).any { !it.matches(Regex("[A-Za-z_$][A-Za-z0-9_$]*")) }) return null
+        return LauncherDexQuery.Symbols(lines[1], lines[2], lines[3])
     }
 
     fun write(file: File, identity: String, symbols: LauncherDexQuery.Symbols) {
@@ -21,7 +21,7 @@ internal object LauncherSymbolCache {
         val temporary = File.createTempFile("launcher-", ".tmp", directory)
         try {
             temporary.writeText(
-                listOf(identity, symbols.inputMethod, symbols.monitorField, symbols.wrapperClass, symbols.pilferMethod)
+                listOf(identity, symbols.inputMethod, symbols.interceptMethod, symbols.releaseMethod)
                     .joinToString("\n"),
             )
             if (!temporary.renameTo(file)) throw IOException("LAUNCHER_CACHE_RENAME_FAILED")
