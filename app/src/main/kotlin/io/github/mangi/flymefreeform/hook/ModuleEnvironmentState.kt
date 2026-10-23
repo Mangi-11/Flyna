@@ -12,7 +12,9 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
+import android.util.DisplayMetrics
 import android.view.Display
+import android.view.RoundedCorner
 import java.util.concurrent.CopyOnWriteArraySet
 
 /** 进程内共享的运行环境；设置与显示尺寸只在启动和系统通知时读取。 */
@@ -37,6 +39,7 @@ internal class ModuleEnvironmentState(
     @Volatile private var keyguardLocked = true
     @Volatile private var keyguardRecheckNeeded = true
     private var lastObservation: Observation? = null
+    private var displayGeometry: DisplayGeometry? = null
     private var lastFailureAt = -10_000L
 
     private val settingsObserver = object : ContentObserver(handler) {
@@ -140,11 +143,22 @@ internal class ModuleEnvironmentState(
         portrait = try {
             // 使用默认物理显示的当前尺寸，避免桌面或小窗的固定竖屏 Configuration 掩盖横屏。
             val size = Point()
-            displays?.getDisplay(Display.DEFAULT_DISPLAY)?.getRealSize(size)
+            val display = displays?.getDisplay(Display.DEFAULT_DISPLAY)
+            display?.getRealSize(size)
             displayAvailable = size.x > 0 && size.y > 0
+            displayGeometry = display?.let {
+                val metrics = DisplayMetrics()
+                it.getRealMetrics(metrics)
+                DisplayGeometry(
+                    size.x, size.y, metrics.densityDpi, it.rotation,
+                    it.getRoundedCorner(RoundedCorner.POSITION_BOTTOM_LEFT),
+                    it.getRoundedCorner(RoundedCorner.POSITION_BOTTOM_RIGHT),
+                )
+            }
             size.x > 0 && size.y > size.x
         } catch (exception: RuntimeException) {
             displayAvailable = false
+            displayGeometry = null
             reportFailure("MODULE_ENVIRONMENT_DISPLAY_FAILED", exception)
             false
         }
@@ -172,7 +186,9 @@ internal class ModuleEnvironmentState(
     }
 
     private fun notifyIfChanged() {
-        val observation = Observation(monitoring, displayAvailable, portrait, gameModeActive, gestureNavigation, keyguardLocked)
+        val observation = Observation(
+            monitoring, displayAvailable, portrait, gameModeActive, gestureNavigation, keyguardLocked, displayGeometry,
+        )
         if (observation == lastObservation) return
         lastObservation = observation
         observers.forEach { observer ->
@@ -216,6 +232,17 @@ internal class ModuleEnvironmentState(
         val gameModeActive: Boolean,
         val gestureNavigation: Boolean,
         val keyguardLocked: Boolean,
+        val displayGeometry: DisplayGeometry?,
+    )
+
+    // 同为竖屏也可能切换分辨率、密度或圆角；刷新率变化不应重复通知几何消费者。
+    private data class DisplayGeometry(
+        val width: Int,
+        val height: Int,
+        val densityDpi: Int,
+        val rotation: Int,
+        val bottomLeft: RoundedCorner?,
+        val bottomRight: RoundedCorner?,
     )
 
     private companion object {

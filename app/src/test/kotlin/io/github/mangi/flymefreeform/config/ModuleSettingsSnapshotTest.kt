@@ -49,11 +49,35 @@ class ModuleSettingsSnapshotTest {
     fun missingKeysUseProductDefaults() {
         val snapshot = ModuleSettingsSnapshot.readFrom(InMemoryPreferences())
 
-        assertEquals(84, snapshot.cornerTriggerRangeDp)
+        assertEquals(84, snapshot.cornerArcLengthDp)
+        assertEquals(12, snapshot.cornerArcWidthDp)
         assertEquals(OutsideTapCloseMode.SingleTap, snapshot.outsideTapCloseMode)
         assertTrue(snapshot.handleSwipeUpToMiniEnabled)
         assertTrue(snapshot.pauseInLandscape)
         assertTrue(snapshot.pauseInGameMode)
+    }
+
+    @Test
+    fun legacyArcLengthIsPreservedWhenWidthIsAdded() {
+        val preferences = InMemoryPreferences("corner_trigger_range_dp" to 72)
+        val restored = ModuleSettingsSnapshot.readFrom(preferences)
+        assertEquals(72, restored.cornerArcLengthDp)
+        assertEquals(12, restored.cornerArcWidthDp)
+        restored.copy(cornerArcWidthDp = 18).writeTo(preferences.edit()).commit()
+        val updated = ModuleSettingsSnapshot.readFrom(preferences)
+        assertEquals(72, updated.cornerArcLengthDp)
+        assertEquals(18, updated.cornerArcWidthDp)
+        assertEquals(72, preferences.getInt("corner_trigger_range_dp", -1))
+    }
+
+    @Test
+    fun arcWidthIsClampedOnReadAndWriteIndependentlyOfLength() {
+        val preferences = InMemoryPreferences(ModulePreferences.KEY_CORNER_ARC_WIDTH_DP to -20)
+        assertEquals(ModulePreferences.MIN_CORNER_ARC_WIDTH_DP, ModuleSettingsSnapshot.readFrom(preferences).cornerArcWidthDp)
+        ModuleSettingsSnapshot(cornerArcLengthDp = 96, cornerArcWidthDp = 200).writeTo(preferences.edit()).commit()
+        val updated = ModuleSettingsSnapshot.readFrom(preferences)
+        assertEquals(96, updated.cornerArcLengthDp)
+        assertEquals(ModulePreferences.MAX_CORNER_ARC_WIDTH_DP, updated.cornerArcWidthDp)
     }
 
     @Test
@@ -138,12 +162,12 @@ class ModuleSettingsSnapshotTest {
     fun cornerRangeIsClampedWhenRead() {
         val preferences =
             InMemoryPreferences(
-                ModulePreferences.KEY_CORNER_TRIGGER_RANGE_DP to 8,
+                ModulePreferences.KEY_CORNER_ARC_LENGTH_DP to 8,
             )
 
         val snapshot = ModuleSettingsSnapshot.readFrom(preferences)
 
-        assertEquals(24, snapshot.cornerTriggerRangeDp)
+        assertEquals(24, snapshot.cornerArcLengthDp)
     }
 
     @Test
@@ -164,15 +188,15 @@ class ModuleSettingsSnapshotTest {
     fun cornerRangeIsClampedAndRoundTripsWhenWritten() {
         val preferences = InMemoryPreferences()
         ModuleSettingsSnapshot(
-            cornerTriggerRangeDp = 200,
+            cornerArcLengthDp = 200,
         ).writeTo(preferences.edit()).commit()
 
         assertEquals(
             160,
-            preferences.getInt(ModulePreferences.KEY_CORNER_TRIGGER_RANGE_DP, 0),
+            preferences.getInt(ModulePreferences.KEY_CORNER_ARC_LENGTH_DP, 0),
         )
         val restored = ModuleSettingsSnapshot.readFrom(preferences)
-        assertEquals(160, restored.cornerTriggerRangeDp)
+        assertEquals(160, restored.cornerArcLengthDp)
     }
 }
 

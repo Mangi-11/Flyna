@@ -6,7 +6,8 @@ internal data class ModuleSettingsSnapshot(
     val enabled: Boolean = ModulePreferences.DEFAULT_ENABLED,
     val leftCornerEnabled: Boolean = ModulePreferences.DEFAULT_CORNER_ENABLED,
     val rightCornerEnabled: Boolean = ModulePreferences.DEFAULT_CORNER_ENABLED,
-    val cornerTriggerRangeDp: Int = ModulePreferences.DEFAULT_CORNER_TRIGGER_RANGE_DP,
+    val cornerArcLengthDp: Int = ModulePreferences.DEFAULT_CORNER_ARC_LENGTH_DP,
+    val cornerArcWidthDp: Int = ModulePreferences.DEFAULT_CORNER_ARC_WIDTH_DP,
     val pinsSaved: Boolean = false,
     val pinnedTargets: List<PinnedTarget> = emptyList(),
     val outsideTapCloseMode: OutsideTapCloseMode =
@@ -27,8 +28,12 @@ internal data class ModuleSettingsSnapshot(
             .putBoolean(ModulePreferences.KEY_PAUSE_IN_LANDSCAPE, pauseInLandscape)
             .putBoolean(ModulePreferences.KEY_PAUSE_IN_GAME_MODE, pauseInGameMode)
             .putInt(
-                ModulePreferences.KEY_CORNER_TRIGGER_RANGE_DP,
-                ModulePreferences.coerceCornerTriggerRangeDp(cornerTriggerRangeDp),
+                ModulePreferences.KEY_CORNER_ARC_LENGTH_DP,
+                ModulePreferences.coerceCornerArcLengthDp(cornerArcLengthDp),
+            )
+            .putInt(
+                ModulePreferences.KEY_CORNER_ARC_WIDTH_DP,
+                ModulePreferences.coerceCornerArcWidthDp(cornerArcWidthDp),
             )
             .putInt(
                 ModulePreferences.KEY_OUTSIDE_TAP_CLOSE_MODE,
@@ -67,11 +72,11 @@ internal data class ModuleSettingsSnapshot(
                     ModulePreferences.KEY_RIGHT_CORNER_ENABLED,
                     ModulePreferences.DEFAULT_CORNER_ENABLED,
                 )
-            val cornerTriggerRangeDp =
-                ModulePreferences.coerceCornerTriggerRangeDp(
+            val cornerArcLengthDp =
+                ModulePreferences.coerceCornerArcLengthDp(
                     preferences.getInt(
-                        ModulePreferences.KEY_CORNER_TRIGGER_RANGE_DP,
-                        ModulePreferences.DEFAULT_CORNER_TRIGGER_RANGE_DP,
+                        ModulePreferences.KEY_CORNER_ARC_LENGTH_DP,
+                        ModulePreferences.DEFAULT_CORNER_ARC_LENGTH_DP,
                     ),
                 )
             val outsideTapCloseMode =
@@ -98,7 +103,10 @@ internal data class ModuleSettingsSnapshot(
                 enabled = enabled,
                 leftCornerEnabled = if (bothCornersDisabled) true else leftEnabled,
                 rightCornerEnabled = if (bothCornersDisabled) true else rightEnabled,
-                cornerTriggerRangeDp = cornerTriggerRangeDp,
+                cornerArcLengthDp = cornerArcLengthDp,
+                cornerArcWidthDp = ModulePreferences.coerceCornerArcWidthDp(
+                    preferences.getInt(ModulePreferences.KEY_CORNER_ARC_WIDTH_DP, ModulePreferences.DEFAULT_CORNER_ARC_WIDTH_DP),
+                ),
                 pinsSaved = pinsSaved,
                 pinnedTargets = pins,
                 outsideTapCloseMode = outsideTapCloseMode,

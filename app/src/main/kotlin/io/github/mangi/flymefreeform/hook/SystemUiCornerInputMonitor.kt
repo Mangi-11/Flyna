@@ -18,17 +18,22 @@ import android.view.WindowManager
 import io.github.libxposed.api.XposedModule
 import io.github.mangi.flymefreeform.config.ModuleSettingsSnapshot
 import io.github.mangi.flymefreeform.gesture.AdaptiveCornerGestureConfig
+import io.github.mangi.flymefreeform.gesture.CornerArc
 import io.github.mangi.flymefreeform.gesture.CornerGestureConfig
 import io.github.mangi.flymefreeform.gesture.CornerGestureEngine
+import io.github.mangi.flymefreeform.gesture.CornerInputHandoff
 import io.github.mangi.flymefreeform.gesture.CornerSide
 import io.github.mangi.flymefreeform.gesture.CornerStreamIdentity
 import io.github.mangi.flymefreeform.gesture.CornerStreamTracker
 import io.github.mangi.flymefreeform.gesture.CornerTriggerRegion
 import io.github.mangi.flymefreeform.gesture.GestureAction
 import io.github.mangi.flymefreeform.gesture.GesturePhase
+import io.github.mangi.flymefreeform.platform.DisplayCornerGeometry
 import io.github.mangi.flymefreeform.platform.coloros.ColorOsInputEventDisplay
 import java.lang.reflect.Field
 import java.lang.reflect.Method
+import kotlin.math.ceil
+import kotlin.math.floor
 
 /** SystemUI 中的受信任 SPY 热区；只抢占触摸，菜单状态仍由 system_server 持有。 */
 @SuppressLint("DiscouragedPrivateApi", "PrivateApi", "RtlHardcoded", "WrongConstant")
@@ -118,31 +123,35 @@ internal class SystemUiCornerInputMonitor(
         settings = snapshot
         pendingSettings = null
         val allowed = environmentState.isGestureAllowed(refreshKeyguard = true)
-        updateSide(CornerSide.Left, allowed && snapshot.leftCornerEnabled)
-        updateSide(CornerSide.Right, allowed && snapshot.rightCornerEnabled)
+        val region = if (allowed) try {
+            DisplayCornerGeometry.read(context, snapshot.cornerArcLengthDp, snapshot.cornerArcWidthDp)
+        } catch (exception: RuntimeException) {
+            module.log(Log.WARN, TAG, "SYSTEMUI_CORNER_GEOMETRY_UNAVAILABLE", exception)
+            null
+        } else null
+        updateSide(CornerSide.Left, allowed && snapshot.leftCornerEnabled, region)
+        updateSide(CornerSide.Right, allowed && snapshot.rightCornerEnabled, region)
         availabilityPublisher.publish()
     }
 
-    private fun updateSide(side: CornerSide, shouldExist: Boolean) {
+    private fun updateSide(side: CornerSide, shouldExist: Boolean, region: CornerTriggerRegion?) {
         val existing = bindings[side]
-        if (!shouldExist) {
+        val arc = if (side == CornerSide.Left) region?.left else region?.right
+        if (!shouldExist || region == null || arc == null) {
             if (existing != null) removeBinding(side, existing)
             return
         }
 
-        val size =
-            (CornerTriggerRegion.radiusPx(
-                settings.cornerTriggerRangeDp,
-                context.resources.displayMetrics.density,
-            ) + 0.5f).toInt().coerceAtLeast(1)
         if (existing == null) {
-            addBinding(side, size)
-        } else if (existing.size != size) {
-            existing.size = size
-            existing.view.rangePx = size.toFloat()
-            existing.view.rangeDp = settings.cornerTriggerRangeDp
+            addBinding(side, region, arc)
+        } else {
+            // 显示几何改变时终止旧坐标系中的流，不能让旧起点驱动新位置上的菜单。
+            if (existing.view.triggerRegion != region) existing.view.resetTracking()
+            existing.view.triggerRegion = region
+            if (existing.arc == arc) return
+            existing.arc = arc
             try {
-                windowManager.updateViewLayout(existing.view, createLayoutParams(side, size))
+                windowManager.updateViewLayout(existing.view, createLayoutParams(side, arc))
             } catch (exception: ReflectiveOperationException) {
                 module.log(Log.WARN, TAG, "SYSTEMUI_CORNER_SPY_UPDATE_FAILED", exception)
                 removeBinding(side, existing)
@@ -153,13 +162,12 @@ internal class SystemUiCornerInputMonitor(
         }
     }
 
-    private fun addBinding(side: CornerSide, size: Int) {
+    private fun addBinding(side: CornerSide, region: CornerTriggerRegion, arc: CornerArc) {
         val view =
             CornerGestureView(
                 context = context,
                 side = side,
-                rangePx = size.toFloat(),
-                rangeDp = settings.cornerTriggerRangeDp,
+                triggerRegion = region,
                 canClaim = { canClaim(side) },
                 pilfer = ::pilfer,
                 client = inputClient,
@@ -170,8 +178,8 @@ internal class SystemUiCornerInputMonitor(
                 onStreamFinished = ::finishStream,
             )
         try {
-            windowManager.addView(view, createLayoutParams(side, size))
-            bindings[side] = CornerBinding(view, size)
+            windowManager.addView(view, createLayoutParams(side, arc))
+            bindings[side] = CornerBinding(view, arc)
         } catch (exception: ReflectiveOperationException) {
             module.log(Log.WARN, TAG, "SYSTEMUI_CORNER_SPY_ADD_FAILED", exception)
         } catch (exception: RuntimeException) {
@@ -234,10 +242,10 @@ internal class SystemUiCornerInputMonitor(
         }
     }
 
-    private fun createLayoutParams(side: CornerSide, size: Int): WindowManager.LayoutParams =
+    private fun createLayoutParams(side: CornerSide, arc: CornerArc): WindowManager.LayoutParams =
         WindowManager.LayoutParams(
-            size,
-            size,
+            ceil(arc.radius).toInt().coerceAtLeast(1),
+            ceil(arc.radius).toInt().coerceAtLeast(1),
             CORNER_GESTURE_WINDOW_TYPE,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
@@ -245,9 +253,9 @@ internal class SystemUiCornerInputMonitor(
                 WindowManager.LayoutParams.FLAG_SPLIT_TOUCH,
             PixelFormat.TRANSPARENT,
         ).apply {
-            gravity =
-                Gravity.BOTTOM or
-                    if (side == CornerSide.Left) Gravity.LEFT else Gravity.RIGHT
+            gravity = Gravity.TOP or Gravity.LEFT
+            x = floor(if (side == CornerSide.Left) arc.centerX - arc.radius else arc.centerX).toInt()
+            y = floor(arc.centerY).toInt()
             title = "$CORNER_INPUT_CHANNEL_TITLE-${side.name}"
             layoutInDisplayCutoutMode =
                 WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
@@ -267,15 +275,14 @@ internal class SystemUiCornerInputMonitor(
 
     private data class CornerBinding(
         val view: CornerGestureView,
-        var size: Int,
+        var arc: CornerArc,
     )
 
     @SuppressLint("ClickableViewAccessibility")
     private class CornerGestureView(
         context: Context,
         private val side: CornerSide,
-        var rangePx: Float,
-        var rangeDp: Int,
+        var triggerRegion: CornerTriggerRegion,
         private val canClaim: () -> Boolean,
         private val pilfer: (View) -> Boolean,
         private val client: SystemUiCornerInputClient,
@@ -283,15 +290,12 @@ internal class SystemUiCornerInputMonitor(
         private val onStreamFinished: () -> Unit,
     ) : View(context) {
         private val engine = CornerGestureEngine()
+        private val handoff = CornerInputHandoff()
         private val stream = CornerStreamTracker()
-        private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop.toFloat()
-        private val density = context.resources.displayMetrics.density
         private var config: CornerGestureConfig? = null
         private var pointerId = -1
         private var session = 0L
         private var generation = 0L
-        private var prepared = false
-        private var activated = false
         private var tracking = false
         private var latestX = 0f
         private var latestY = 0f
@@ -323,8 +327,9 @@ internal class SystemUiCornerInputMonitor(
                     }
                     val metrics = context.resources.displayMetrics
                     val candidate = AdaptiveCornerGestureConfig.create(
-                        metrics.widthPixels.toFloat(), metrics.heightPixels.toFloat(), touchSlop,
-                        density, rangeDp, side == CornerSide.Left, side == CornerSide.Right,
+                        triggerRegion,
+                        ViewConfiguration.get(context).scaledTouchSlop.toFloat(),
+                        metrics.density, side == CornerSide.Left, side == CornerSide.Right,
                     )
                     pointerId = event.getPointerId(0)
                     engine.down(pointerId, event.rawX, event.rawY, candidate, event.eventTime)
@@ -337,6 +342,12 @@ internal class SystemUiCornerInputMonitor(
                     latestY = event.rawY
                     latestTime = event.eventTime
                     tracking = true
+                    // 仅在实际圆角窄弧带命中的 DOWN 抢占，不等待 MOVE 或跨进程准备确认。
+                    if (!handoff.claimInput { pilfer(this) }) {
+                        cancelStream()
+                        onStreamFinished()
+                        return true
+                    }
                     val currentGeneration = ++generation
                     session = client.begin(latestX, latestY) { allowed ->
                         if (!tracking || generation != currentGeneration) return@begin
@@ -344,8 +355,8 @@ internal class SystemUiCornerInputMonitor(
                             cancelStream()
                             onStreamFinished()
                         } else {
-                            prepared = true
-                            tryActivate()
+                            handoff.acceptPreparation()
+                            advanceGesture()
                         }
                     }
                     if (session == 0L) cancelStream()
@@ -368,10 +379,10 @@ internal class SystemUiCornerInputMonitor(
                     latestY = event.getRawY(index)
                     latestTime = event.eventTime
                     when (engine.move(pointerId, event.pointerCount, latestX, latestY, current, latestTime)) {
-                        is GestureAction.Activate -> tryActivate()
+                        is GestureAction.Activate -> advanceGesture()
                         is GestureAction.Update -> {
-                            if (!activated) tryActivate()
-                            if (activated) client.move(session, latestX, latestY, latestTime)
+                            if (!handoff.isActive) advanceGesture()
+                            if (handoff.isActive) client.move(session, latestX, latestY, latestTime)
                         }
                         GestureAction.Cancel -> { cancelStream(); onStreamFinished() }
                         else -> if (engine.phase == GesturePhase.Yielded) { cancelStream(); onStreamFinished() }
@@ -379,7 +390,7 @@ internal class SystemUiCornerInputMonitor(
                 }
                 MotionEvent.ACTION_POINTER_DOWN -> { cancelStream(); onStreamFinished() }
                 MotionEvent.ACTION_UP -> {
-                    if (tracking && activated && canClaim() && event.getPointerId(event.actionIndex) == pointerId) {
+                    if (tracking && handoff.isActive && canClaim() && event.getPointerId(event.actionIndex) == pointerId) {
                         client.finish(session, event.rawX, event.rawY, event.eventTime)
                         session = 0L
                     }
@@ -391,29 +402,24 @@ internal class SystemUiCornerInputMonitor(
             return true
         }
 
-        private fun tryActivate() {
-            if (!tracking || activated || !prepared || !engine.isClaimed || !canClaim()) return
-            // 只允许这个输入窗口提出抢占；反射调用完成不等于 native 层已确认成功。
-            if (!pilfer(this)) {
-                cancelStream()
-                onStreamFinished()
-                return
-            }
-            activated = true
-            if (!client.activate(session, latestX, latestY, latestTime)) {
+        private fun advanceGesture() {
+            if (!tracking || !canClaim()) return
+            if (!handoff.activateIfReady(
+                    menuReady = engine.isMenuReady,
+                    activateMenu = { client.activate(session, latestX, latestY, latestTime) },
+                )) {
                 cancelStream()
                 onStreamFinished()
             }
         }
 
         fun cancelStream(identity: CornerStreamIdentity? = stream.identity) {
-            if (tracking && !activated) identity?.let(releaseUnclaimed)
+            if (tracking && !handoff.isClaimed) identity?.let(releaseUnclaimed)
             generation++
             val id = session
             session = 0L
             tracking = false
-            activated = false
-            prepared = false
+            handoff.reset()
             config = null
             pointerId = -1
             engine.cancel()

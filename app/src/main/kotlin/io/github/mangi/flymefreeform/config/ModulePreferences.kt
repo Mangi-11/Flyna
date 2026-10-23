@@ -11,7 +11,9 @@ internal object ModulePreferences {
     const val KEY_MODULE_ENABLED = "enabled"
     const val KEY_LEFT_CORNER_ENABLED = "corner_left_enabled"
     const val KEY_RIGHT_CORNER_ENABLED = "corner_right_enabled"
-    const val KEY_CORNER_TRIGGER_RANGE_DP = "corner_trigger_range_dp"
+    // 保留已发布的弧长存储名，升级不丢失用户设置。
+    const val KEY_CORNER_ARC_LENGTH_DP = "corner_trigger_range_dp"
+    const val KEY_CORNER_ARC_WIDTH_DP = "corner_arc_width_dp"
     const val KEY_PINNED_TARGETS = "corner_targets_v2"
     const val KEY_CORNER_PINS = "corner_pins_v1"
     const val KEY_OUTSIDE_TAP_CLOSE_MODE = "outside_tap_close_mode_v1"
@@ -20,15 +22,21 @@ internal object ModulePreferences {
     const val KEY_PAUSE_IN_GAME_MODE = "pause_in_game_mode"
     const val DEFAULT_ENABLED = false
     const val DEFAULT_CORNER_ENABLED = true
-    const val DEFAULT_CORNER_TRIGGER_RANGE_DP = 84
+    const val DEFAULT_CORNER_ARC_LENGTH_DP = 84
+    const val DEFAULT_CORNER_ARC_WIDTH_DP = 12
     val DEFAULT_OUTSIDE_TAP_CLOSE_MODE = OutsideTapCloseMode.SingleTap
     const val DEFAULT_HANDLE_SWIPE_UP_TO_MINI_ENABLED = true
     const val DEFAULT_PAUSE_IN_LANDSCAPE = true
     const val DEFAULT_PAUSE_IN_GAME_MODE = true
-    const val MIN_CORNER_TRIGGER_RANGE_DP = 24
-    const val MAX_CORNER_TRIGGER_RANGE_DP = 160
+    const val MIN_CORNER_ARC_LENGTH_DP = 24
+    const val MAX_CORNER_ARC_LENGTH_DP = 160
+    const val MIN_CORNER_ARC_WIDTH_DP = 4
+    const val MAX_CORNER_ARC_WIDTH_DP = 24
     const val MAX_PINNED_APPS = 6
 
-    fun coerceCornerTriggerRangeDp(value: Int): Int =
-        value.coerceIn(MIN_CORNER_TRIGGER_RANGE_DP, MAX_CORNER_TRIGGER_RANGE_DP)
+    fun coerceCornerArcLengthDp(value: Int): Int =
+        value.coerceIn(MIN_CORNER_ARC_LENGTH_DP, MAX_CORNER_ARC_LENGTH_DP)
+
+    fun coerceCornerArcWidthDp(value: Int): Int =
+        value.coerceIn(MIN_CORNER_ARC_WIDTH_DP, MAX_CORNER_ARC_WIDTH_DP)
 }

@@ -1,7 +1,6 @@
 package io.github.mangi.flymefreeform.hook
 
 import android.content.Context
-import android.graphics.Point
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
@@ -18,7 +17,7 @@ import io.github.mangi.flymefreeform.gesture.CornerReleaseHistory
 import io.github.mangi.flymefreeform.gesture.CornerSide
 import io.github.mangi.flymefreeform.gesture.CornerStreamIdentity
 import io.github.mangi.flymefreeform.gesture.CornerStreamTracker
-import io.github.mangi.flymefreeform.gesture.CornerTriggerRegion
+import io.github.mangi.flymefreeform.platform.DisplayCornerGeometry
 import io.github.mangi.flymefreeform.gesture.CornerVisualGate
 import io.github.mangi.flymefreeform.platform.coloros.ColorOsInputEventDisplay
 import io.github.mangi.flymefreeform.platform.coloros.ColorOsNavigationFeedbackTarget
@@ -96,29 +95,15 @@ internal class SystemUiNavigationFeedbackHook(
                 // 厂商回注可改变 downTime；同一物理起点不重开本地候选。
                 if (!newStream) return false
                 state.gate.finish()
-                state.side = null
                 if (state.stream.identity?.let { releases.contains(it, SystemClock.uptimeMillis()) } == true) return false
                 val config = createConfig(view, event) ?: return false
-                state.side = CornerTriggerRegion.detectSide(
-                    event.rawX, event.rawY, config.displayWidth, config.displayHeight,
-                    config.triggerRadius, config.leftEnabled, config.rightEnabled,
-                )
-                state.gate.down(event.getPointerId(0), event.rawX, event.rawY, config, event.eventTime)
+                state.gate.down(event.rawX, event.rawY, config)
                 // DOWN 保留原生 detector 初始化；不缓存 Chain 或 MotionEvent。
             }
             MotionEvent.ACTION_MOVE -> {
                 if (!state.stream.matches(event.deviceId, ColorOsInputEventDisplay.read(event))) return false
-                val side = state.side ?: return false
-                if (!canSuppress(side)) {
-                    state.gate.cancel()
-                    state.side = null
-                    return false
-                }
-                return state.gate.move(
-                    event.getPointerId(0), event.pointerCount, event.rawX, event.rawY, event.eventTime,
-                )
+                return state.gate.defersMoves
             }
-            MotionEvent.ACTION_POINTER_DOWN -> state.gate.pointerDown()
             MotionEvent.ACTION_UP,
             MotionEvent.ACTION_CANCEL -> {
                 state.gate.finish()
@@ -130,7 +115,6 @@ internal class SystemUiNavigationFeedbackHook(
         return false
     }
 
-    @Suppress("DEPRECATION")
     private fun createConfig(view: View, event: MotionEvent): CornerGestureConfig? {
         if (!configuration.isAvailable || !event.isFromSource(InputDevice.SOURCE_TOUCHSCREEN)) return null
         if (event.pointerCount != 1 || event.getToolType(0) != MotionEvent.TOOL_TYPE_FINGER) return null
@@ -142,15 +126,11 @@ internal class SystemUiNavigationFeedbackHook(
         val location = IntArray(2)
         view.getLocationOnScreen(location)
         if (event.rawX >= location[0] && event.rawX <= location[0] + view.width) return null
-        val size = Point()
-        display.getRealSize(size)
-        if (size.x <= 0 || size.y <= 0) return null
+        val region = DisplayCornerGeometry.read(view.context, settings.cornerArcLengthDp, settings.cornerArcWidthDp) ?: return null
         return AdaptiveCornerGestureConfig.create(
-            displayWidth = size.x.toFloat(),
-            displayHeight = size.y.toFloat(),
+            triggerRegion = region,
             touchSlop = touchSlop,
             density = view.resources.displayMetrics.density,
-            triggerRangeDp = settings.cornerTriggerRangeDp,
             leftEnabled = settings.leftCornerEnabled && canSuppress(CornerSide.Left),
             rightEnabled = settings.rightCornerEnabled && canSuppress(CornerSide.Right),
         )
@@ -166,7 +146,6 @@ internal class SystemUiNavigationFeedbackHook(
     private class FeedbackState {
         val gate = CornerVisualGate()
         val stream = CornerStreamTracker()
-        var side: CornerSide? = null
     }
 
     private companion object {

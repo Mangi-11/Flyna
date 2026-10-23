@@ -232,10 +232,13 @@ internal class SystemUiCornerInputClient(
     private fun completePreparation(session: Session, accepted: Boolean) {
         val callback = session.onPrepared ?: return
         session.onPrepared = null
-        handler.post {
+        val notify = Runnable {
             try { callback(accepted && current === session) }
             catch (exception: RuntimeException) { report("CORNER_INPUT_PREPARED_CALLBACK_FAILED", exception) }
         }
+        // ACCEPT 已由同一 Looper 的 Messenger 分发，立即确认可避免接管前再次排队。
+        // 失败可能发生在 begin/send 内，仍延后通知，避免重入尚未完成赋值的调用方。
+        if (accepted) notify.run() else handler.post(notify)
     }
 
     private fun disconnect(notify: Boolean) {

@@ -3,7 +3,6 @@ package io.github.mangi.flymefreeform.ui
 import android.content.ActivityNotFoundException
 import androidx.annotation.StringRes
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -35,6 +34,8 @@ import androidx.compose.material.icons.rounded.SwipeRight
 import androidx.compose.material.icons.rounded.SwipeUp
 import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -43,10 +44,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.PathEffect
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -87,7 +84,8 @@ internal fun ControlScreen(
     state: FrameworkConnectionState,
     onModuleEnabledChange: (Boolean) -> Unit,
     onCornerSidesChange: (Boolean, Boolean) -> Unit,
-    onCornerTriggerRangeChange: (Int) -> Unit,
+    onCornerArcLengthChange: (Int) -> Unit,
+    onCornerArcWidthChange: (Int) -> Unit,
     onOutsideTapCloseModeChange: (OutsideTapCloseMode) -> Unit,
     onHandleSwipeUpToMiniEnabledChange: (Boolean) -> Unit,
     onPauseInLandscapeChange: (Boolean) -> Unit,
@@ -99,9 +97,13 @@ internal fun ControlScreen(
     val backdrop = rememberTopBarBackdrop()
     val topBarColor = topBarContainerColor(backdrop)
     val featuresEnabled = state.canChangeSettings && state.settings.enabled
-    var cornerRangePreviewDp by remember { mutableStateOf<Int?>(null) }
+    val cornerArcLengthPreviewDp = remember { mutableStateOf<Int?>(null) }
+    val cornerArcWidthPreviewDp = remember { mutableStateOf<Int?>(null) }
     LaunchedEffect(featuresEnabled) {
-        if (!featuresEnabled) cornerRangePreviewDp = null
+        if (!featuresEnabled) {
+            cornerArcLengthPreviewDp.value = null
+            cornerArcWidthPreviewDp.value = null
+        }
     }
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val windowWidth = maxWidth
@@ -165,8 +167,10 @@ internal fun ControlScreen(
                             state = state,
                             featuresEnabled = featuresEnabled,
                             onCornerSidesChange = onCornerSidesChange,
-                            onCornerTriggerRangeChange = onCornerTriggerRangeChange,
-                            onCornerRangePreviewChange = { cornerRangePreviewDp = it },
+                            onCornerArcLengthChange = onCornerArcLengthChange,
+                            onArcLengthPreviewChange = { cornerArcLengthPreviewDp.value = it },
+                            onCornerArcWidthChange = onCornerArcWidthChange,
+                            onArcWidthPreviewChange = { cornerArcWidthPreviewDp.value = it },
                             onNavigateToPinnedApps = onNavigateToPinnedApps,
                         )
                     }
@@ -191,13 +195,14 @@ internal fun ControlScreen(
                 }
             }
         }
-        cornerRangePreviewDp?.let { rangeDp ->
-            CornerRangePreview(
-                rangeDp = rangeDp,
-                leftEnabled = state.settings.leftCornerEnabled,
-                rightEnabled = state.settings.rightCornerEnabled,
-            )
-        }
+        CornerTriggerPreview(
+            lengthPreview = cornerArcLengthPreviewDp,
+            widthPreview = cornerArcWidthPreviewDp,
+            confirmedLengthDp = state.settings.cornerArcLengthDp,
+            confirmedWidthDp = state.settings.cornerArcWidthDp,
+            leftEnabled = state.settings.leftCornerEnabled,
+            rightEnabled = state.settings.rightCornerEnabled,
+        )
     }
 }
 
@@ -332,8 +337,10 @@ private fun SettingsCard(
     state: FrameworkConnectionState,
     featuresEnabled: Boolean,
     onCornerSidesChange: (Boolean, Boolean) -> Unit,
-    onCornerTriggerRangeChange: (Int) -> Unit,
-    onCornerRangePreviewChange: (Int?) -> Unit,
+    onCornerArcLengthChange: (Int) -> Unit,
+    onCornerArcWidthChange: (Int) -> Unit,
+    onArcLengthPreviewChange: (Int?) -> Unit,
+    onArcWidthPreviewChange: (Int?) -> Unit,
     onNavigateToPinnedApps: () -> Unit,
 ) {
     val selectedSideIndex =
@@ -372,13 +379,25 @@ private fun SettingsCard(
         )
         RemoteDpSliderPreference(
             icon = Icons.Rounded.Straighten,
-            confirmedValue = state.settings.cornerTriggerRangeDp,
+            confirmedValue = state.settings.cornerArcLengthDp,
             isUpdating = state.isUpdating,
             enabled = featuresEnabled,
             title = stringResource(R.string.corner_trigger_range_title),
             summary = stringResource(R.string.corner_trigger_range_summary),
-            onPreviewChange = onCornerRangePreviewChange,
-            onCommit = onCornerTriggerRangeChange,
+            valueRange = ModulePreferences.MIN_CORNER_ARC_LENGTH_DP..ModulePreferences.MAX_CORNER_ARC_LENGTH_DP,
+            onPreviewChange = onArcLengthPreviewChange,
+            onCommit = onCornerArcLengthChange,
+        )
+        RemoteDpSliderPreference(
+            icon = Icons.Rounded.Straighten,
+            confirmedValue = state.settings.cornerArcWidthDp,
+            isUpdating = state.isUpdating,
+            enabled = featuresEnabled,
+            title = stringResource(R.string.corner_arc_width_title),
+            summary = stringResource(R.string.corner_arc_width_summary),
+            valueRange = ModulePreferences.MIN_CORNER_ARC_WIDTH_DP..ModulePreferences.MAX_CORNER_ARC_WIDTH_DP,
+            onPreviewChange = onArcWidthPreviewChange,
+            onCommit = onCornerArcWidthChange,
         )
         ArrowPreference(
             title = stringResource(R.string.radial_apps_title),
@@ -398,23 +417,26 @@ private fun RemoteDpSliderPreference(
     enabled: Boolean,
     title: String,
     summary: String,
+    valueRange: IntRange,
     onPreviewChange: (Int?) -> Unit,
     onCommit: (Int) -> Unit,
 ) {
-    var draftValue by rememberSaveable { mutableFloatStateOf(confirmedValue.toFloat()) }
+    var draftValue by rememberSaveable { mutableFloatStateOf(confirmedValue.coerceIn(valueRange).toFloat()) }
     var isDragging by remember { mutableStateOf(false) }
-    LaunchedEffect(confirmedValue, isUpdating, enabled) {
+    val currentPreviewChange by rememberUpdatedState(onPreviewChange)
+    DisposableEffect(Unit) { onDispose { currentPreviewChange(null) } }
+    LaunchedEffect(confirmedValue, isUpdating, enabled, valueRange) {
         if (!enabled) {
             isDragging = false
             onPreviewChange(null)
         }
-        if (!isDragging && !isUpdating) draftValue = confirmedValue.toFloat()
+        if (!isDragging && !isUpdating) draftValue = confirmedValue.coerceIn(valueRange).toFloat()
     }
     SliderPreference(
         value = draftValue,
         onValueChange = { value ->
             isDragging = true
-            val draft = ModulePreferences.coerceCornerTriggerRangeDp(value.roundToInt())
+            val draft = value.roundToInt().coerceIn(valueRange)
             draftValue = draft.toFloat()
             onPreviewChange(draft)
         },
@@ -423,70 +445,17 @@ private fun RemoteDpSliderPreference(
         valueText = stringResource(R.string.dp_value, draftValue.roundToInt()),
         enabled = enabled,
         startAction = { PreferenceIcon(icon, enabled) },
-        valueRange =
-            ModulePreferences.MIN_CORNER_TRIGGER_RANGE_DP.toFloat()..
-                ModulePreferences.MAX_CORNER_TRIGGER_RANGE_DP.toFloat(),
-        steps =
-            ModulePreferences.MAX_CORNER_TRIGGER_RANGE_DP -
-                ModulePreferences.MIN_CORNER_TRIGGER_RANGE_DP -
-                1,
+        valueRange = valueRange.first.toFloat()..valueRange.last.toFloat(),
+        steps = (valueRange.last - valueRange.first - 1).coerceAtLeast(0),
         onValueChangeFinished = {
             isDragging = false
             onPreviewChange(null)
             val committed =
-                ModulePreferences.coerceCornerTriggerRangeDp(draftValue.roundToInt())
+                draftValue.roundToInt().coerceIn(valueRange)
             draftValue = committed.toFloat()
             if (committed != confirmedValue) onCommit(committed)
         },
     )
-}
-
-@Composable
-private fun CornerRangePreview(
-    rangeDp: Int,
-    leftEnabled: Boolean,
-    rightEnabled: Boolean,
-) {
-    val activeColor = MiuixTheme.colorScheme.primary
-    val inactiveColor = MiuixTheme.colorScheme.onSurfaceVariantSummary
-    Canvas(modifier = Modifier.fillMaxSize()) {
-        val radius = rangeDp.dp.toPx()
-        val arcSize = Size(radius * 2f, radius * 2f)
-        val strokeWidth = 2.dp.toPx()
-        val dash = PathEffect.dashPathEffect(floatArrayOf(7.dp.toPx(), 5.dp.toPx()))
-
-        fun drawCorner(startAngle: Float, topLeft: Offset, enabled: Boolean) {
-            val color = if (enabled) activeColor else inactiveColor
-            drawArc(
-                color = color.copy(alpha = if (enabled) 0.22f else 0.08f),
-                startAngle = startAngle,
-                sweepAngle = 90f,
-                useCenter = true,
-                topLeft = topLeft,
-                size = arcSize,
-            )
-            drawArc(
-                color = color.copy(alpha = if (enabled) 0.82f else 0.30f),
-                startAngle = startAngle,
-                sweepAngle = 90f,
-                useCenter = false,
-                topLeft = topLeft,
-                size = arcSize,
-                style = Stroke(width = strokeWidth, pathEffect = dash),
-            )
-        }
-
-        drawCorner(
-            startAngle = 270f,
-            topLeft = Offset(-radius, size.height - radius),
-            enabled = leftEnabled,
-        )
-        drawCorner(
-            startAngle = 180f,
-            topLeft = Offset(size.width - radius, size.height - radius),
-            enabled = rightEnabled,
-        )
-    }
 }
 
 @Composable

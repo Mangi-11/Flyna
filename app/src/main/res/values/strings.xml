@@ -27,12 +27,14 @@
     <string name="module_enabled_summary_updating">正在同步配置</string>
     <string name="module_enabled_summary_scope">补全所需作用域后可更改</string>
     <string name="corner_trigger_side_title">触发位置</string>
-    <string name="corner_trigger_side_summary">从屏幕底角斜向内上滑呼出扇形菜单</string>
+    <string name="corner_trigger_side_summary">从圆角弧带上滑呼出菜单，弧带内点击由小窗接管</string>
     <string name="corner_trigger_side_both">左右下角</string>
     <string name="corner_trigger_side_left">仅左下角</string>
     <string name="corner_trigger_side_right">仅右下角</string>
-    <string name="corner_trigger_range_title">角落触发范围</string>
-    <string name="corner_trigger_range_summary">调整底部两角的手势识别区域大小</string>
+    <string name="corner_trigger_range_title">弧长</string>
+    <string name="corner_trigger_range_summary">沿屏幕圆角延伸的长度，最多覆盖完整圆角</string>
+    <string name="corner_arc_width_title">弧宽</string>
+    <string name="corner_arc_width_summary">从屏幕边缘向内的宽度；拖动时预览，小窗内等比缩放</string>
     <string name="dp_value">%1$d dp</string>
     <string name="radial_apps_title">扇形快捷项</string>
     <string name="radial_apps_recent_summary">首次使用时默认展示最近使用的六个应用</string>

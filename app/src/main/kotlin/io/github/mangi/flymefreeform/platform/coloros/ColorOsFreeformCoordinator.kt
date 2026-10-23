@@ -19,7 +19,7 @@ import io.github.mangi.flymefreeform.config.ModuleSettingsSnapshot
 import io.github.mangi.flymefreeform.config.PinnedTarget
 import io.github.mangi.flymefreeform.config.PinnedTargetCodec
 import io.github.mangi.flymefreeform.gesture.CornerSide
-import io.github.mangi.flymefreeform.gesture.CornerTriggerRegion
+import io.github.mangi.flymefreeform.platform.DisplayCornerGeometry
 import io.github.mangi.flymefreeform.hook.ModuleEnvironmentState
 import io.github.mangi.flymefreeform.hook.ProcessConfiguration
 import io.github.mangi.flymefreeform.window.CornerRadialOverlayView
@@ -244,12 +244,8 @@ internal class ColorOsFreeformCoordinator(
 
     private fun prepareCornerInput(x: Float, y: Float): CornerSide? {
         if (!inputEnabled || morePanelActive || !isGestureEnvironmentAllowed()) return null
-        val metrics = context.resources.displayMetrics
-        val side = CornerTriggerRegion.detectSide(
-            x, y, metrics.widthPixels.toFloat(), metrics.heightPixels.toFloat(),
-            CornerTriggerRegion.radiusPx(lastSettings.cornerTriggerRangeDp, metrics.density),
-            lastSettings.leftCornerEnabled, lastSettings.rightCornerEnabled,
-        ) ?: return null
+        val region = DisplayCornerGeometry.read(context, lastSettings.cornerArcLengthDp, lastSettings.cornerArcWidthDp) ?: return null
+        val side = region.detectSide(x, y, lastSettings.leftCornerEnabled, lastSettings.rightCornerEnabled) ?: return null
         pointerGeneration++
         entryLaunchGeneration++
         entryCatalog.cancelLaunch()

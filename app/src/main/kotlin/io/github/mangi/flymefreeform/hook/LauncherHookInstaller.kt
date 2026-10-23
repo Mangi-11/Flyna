@@ -18,8 +18,8 @@ import io.github.mangi.flymefreeform.gesture.AdaptiveCornerGestureConfig
 import io.github.mangi.flymefreeform.gesture.CornerGestureConfig
 import io.github.mangi.flymefreeform.gesture.CornerStreamIdentity
 import io.github.mangi.flymefreeform.gesture.CornerStreamTracker
-import io.github.mangi.flymefreeform.gesture.CornerTriggerRegion
 import io.github.mangi.flymefreeform.gesture.CornerVisualGate
+import io.github.mangi.flymefreeform.platform.DisplayCornerGeometry
 import io.github.mangi.flymefreeform.platform.coloros.ColorOsInputEventDisplay
 import io.github.mangi.flymefreeform.platform.coloros.ColorOsLauncherInputTarget
 import io.github.mangi.flymefreeform.platform.coloros.ColorOsLauncherWorkspaceTarget
@@ -236,15 +236,13 @@ internal class LauncherHookInstaller(
             stream.cancel()
             if (stream.identity.identity?.let(availability::wasReleased) == true) return false
             val config = createEligibleConfig(owner, event) ?: return false
-            stream.pointerId = event.getPointerId(0)
-            stream.gate.down(stream.pointerId, event.rawX, event.rawY, config, event.eventTime)
+            stream.gate.down(event.rawX, event.rawY, config)
             return false
         }
         if (!stream.identity.matches(event.deviceId, ColorOsInputEventDisplay.read(event))) return false
         return when (event.actionMasked) {
             MotionEvent.ACTION_MOVE -> deferMove(stream, event)
             MotionEvent.ACTION_POINTER_DOWN, MotionEvent.ACTION_POINTER_UP -> {
-                stream.gate.pointerDown()
                 false
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
@@ -258,17 +256,9 @@ internal class LauncherHookInstaller(
 
     private fun deferMove(stream: VisualStream, event: MotionEvent): Boolean {
         if (event.actionMasked != MotionEvent.ACTION_MOVE ||
-            !stream.identity.matches(event.deviceId, ColorOsInputEventDisplay.read(event)) || stream.pointerId < 0
+            !stream.identity.matches(event.deviceId, ColorOsInputEventDisplay.read(event))
         ) return false
-        if (!environmentState.isGestureAllowed() || !availability.isReady) {
-            stream.gate.cancelCandidate()
-        }
-        // 原指针抬起后仍传入真实剩余指针：候选因身份不符退出，已识别流保持到终止。
-        val pointerIndex = event.findPointerIndex(stream.pointerId).takeIf { it >= 0 } ?: 0
-        return stream.gate.move(
-            event.getPointerId(pointerIndex), event.pointerCount,
-            event.getRawX(pointerIndex), event.getRawY(pointerIndex), event.eventTime,
-        )
+        return stream.gate.defersMoves
     }
 
     private fun createEligibleConfig(
@@ -289,24 +279,17 @@ internal class LauncherHookInstaller(
         }
 
         val metrics = owner.resources.displayMetrics
-        val width = metrics.widthPixels.toFloat()
-        val height = metrics.heightPixels.toFloat()
-        if (width <= 0f || height <= 0f) return null
+        val region = DisplayCornerGeometry.read(owner, settings.cornerArcLengthDp, settings.cornerArcWidthDp) ?: return null
         return AdaptiveCornerGestureConfig.create(
-            displayWidth = width,
-            displayHeight = height,
+            triggerRegion = region,
             touchSlop = ViewConfiguration.get(owner).scaledTouchSlop.toFloat(),
             density = metrics.density,
-            triggerRangeDp = settings.cornerTriggerRangeDp,
             leftEnabled = settings.leftCornerEnabled,
             rightEnabled = settings.rightCornerEnabled,
         ).takeIf { config ->
-            CornerTriggerRegion.detectSide(
+            config.triggerRegion.detectSide(
                 x = event.rawX,
                 y = event.rawY,
-                displayWidth = config.displayWidth,
-                displayHeight = config.displayHeight,
-                radius = config.triggerRadius,
                 leftEnabled = config.leftEnabled,
                 rightEnabled = config.rightEnabled,
             ) != null
@@ -319,16 +302,8 @@ internal class LauncherHookInstaller(
         val start = {
             availability.start(owner)
             environmentState.start(owner)
-            environmentState.observe { cancelCandidates() }
-            configuration.observe { cancelCandidates() }
         }
         if (Looper.myLooper() == Looper.getMainLooper()) start() else mainHandler.post { start() }
-    }
-
-    private fun cancelCandidates() = synchronized(streamLock) {
-        quickstepStreams.values.forEach { it.gate.cancelCandidate() }
-        workspaceStreams.values.forEach { it.gate.cancelCandidate() }
-        // 身份与已识别流的视觉门保持到终止，避免中途重新识别或恢复竞争动画。
     }
 
     private fun releaseUnclaimed(identity: CornerStreamIdentity) = synchronized(streamLock) {
@@ -355,11 +330,9 @@ internal class LauncherHookInstaller(
     private class VisualStream {
         val identity = CornerStreamTracker()
         val gate = CornerVisualGate()
-        var pointerId = -1
 
         fun cancel() {
             gate.cancel()
-            pointerId = -1
         }
     }
 

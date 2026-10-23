@@ -18,6 +18,6 @@ class AppCatalogSnapshotTest {
     fun unrelatedGestureSettingsDoNotInvalidatePreparedIcons() {
         val requested = ModuleSettingsSnapshot()
         val completed = AppCatalogSnapshot(settings = requested)
-        assertTrue(completed.matches(requested.copy(cornerTriggerRangeDp = 100, enabled = true)))
+        assertTrue(completed.matches(requested.copy(cornerArcLengthDp = 100, enabled = true)))
     }
 }

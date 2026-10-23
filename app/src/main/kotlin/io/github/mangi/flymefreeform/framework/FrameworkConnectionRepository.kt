@@ -59,16 +59,19 @@ internal class FrameworkConnectionRepository(private val context: Context) {
             )
         }
 
-    fun setCornerTriggerRangeDp(rangeDp: Int) =
+    fun setCornerArcLengthDp(rangeDp: Int) =
         updateSettings {
             it.copy(
-                cornerTriggerRangeDp =
-                    ModulePreferences.coerceCornerTriggerRangeDp(rangeDp),
+                cornerArcLengthDp =
+                    ModulePreferences.coerceCornerArcLengthDp(rangeDp),
             )
         }
 
     fun setOutsideTapCloseMode(mode: OutsideTapCloseMode) =
         updateSettings { it.copy(outsideTapCloseMode = mode) }
+
+    fun setCornerArcWidthDp(widthDp: Int) =
+        updateSettings { it.copy(cornerArcWidthDp = ModulePreferences.coerceCornerArcWidthDp(widthDp)) }
 
     fun setHandleSwipeUpToMiniEnabled(enabled: Boolean) =
         updateSettings { it.copy(handleSwipeUpToMiniEnabled = enabled) }

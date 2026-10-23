@@ -34,11 +34,8 @@ internal sealed interface GestureAction {
 }
 
 internal data class CornerGestureConfig(
-    val displayWidth: Float,
-    val displayHeight: Float,
-    val triggerRadius: Float,
-    val inwardThreshold: Float,
-    val upwardThreshold: Float,
+    val triggerRegion: CornerTriggerRegion,
+    val activationDistance: Float,
     val reverseTolerance: Float,
     val leftEnabled: Boolean,
     val rightEnabled: Boolean,
@@ -46,33 +43,24 @@ internal data class CornerGestureConfig(
 
 internal object AdaptiveCornerGestureConfig {
     fun create(
-        displayWidth: Float,
-        displayHeight: Float,
+        triggerRegion: CornerTriggerRegion,
         touchSlop: Float,
         density: Float,
-        triggerRangeDp: Int,
         leftEnabled: Boolean,
         rightEnabled: Boolean,
     ): CornerGestureConfig {
         val safeDensity = density.takeIf { it.isFinite() && it > 0f } ?: 1f
-        val triggerRadius = CornerTriggerRegion.radiusPx(triggerRangeDp, safeDensity)
         return CornerGestureConfig(
-            displayWidth = displayWidth,
-            displayHeight = displayHeight,
-            triggerRadius = triggerRadius,
-            inwardThreshold = max(touchSlop * INWARD_SLOP_MULTIPLIER, safeDensity * INWARD_DP),
-            upwardThreshold = max(touchSlop * UPWARD_SLOP_MULTIPLIER, safeDensity * UPWARD_DP),
+            triggerRegion = triggerRegion,
+            activationDistance = max(touchSlop, safeDensity * MIN_ACTIVATION_DP),
             reverseTolerance = max(touchSlop, safeDensity * REVERSE_TOLERANCE_DP),
             leftEnabled = leftEnabled,
             rightEnabled = rightEnabled,
         )
     }
 
-    private const val INWARD_SLOP_MULTIPLIER = 1.75f
-    private const val UPWARD_SLOP_MULTIPLIER = 0.50f
-    private const val INWARD_DP = 14f
-    private const val UPWARD_DP = 4f
     private const val REVERSE_TOLERANCE_DP = 8f
+    private const val MIN_ACTIVATION_DP = 4f
 }
 
 /** 单指角落手势状态机；不持有 MotionEvent，便于跨进程入口复用与单元测试。 */
@@ -86,7 +74,6 @@ internal class CornerGestureEngine {
     private var originX = 0f
     private var originY = 0f
     private var side: CornerSide? = null
-    private var claimed = false
     private var downTimeMillis = 0L
 
     fun down(
@@ -104,7 +91,7 @@ internal class CornerGestureEngine {
         downTimeMillis = eventTimeMillis
         side = detectedSide
         phase = GesturePhase.Armed
-        return GestureAction.PassThrough
+        return GestureAction.Ignore
     }
 
     fun move(
@@ -125,12 +112,10 @@ internal class CornerGestureEngine {
         if (inward < -config.reverseTolerance || upward < -config.reverseTolerance) {
             return reject()
         }
-        if (!claimed) {
+        if (!isMenuReady) {
             if (eventTimeMillis < downTimeMillis) return reject()
-            if (inward < config.inwardThreshold || upward < config.upwardThreshold) {
-                return GestureAction.PassThrough
-            }
-            claimed = true
+            // 边缘 DOWN 已由输入窗口接管；这里只排除点击抖动，不再裁决输入方向归属。
+            if (upward < config.activationDistance) return GestureAction.Ignore
             phase = GesturePhase.Revealing
             return GestureAction.Activate(activeSide, originX, originY, x, y)
         }
@@ -141,10 +126,12 @@ internal class CornerGestureEngine {
 
     fun up(pointerId: Int): GestureAction {
         if (pointerId != this.pointerId) return cancel()
-        if (!claimed) {
+        if (side == null) {
             reset()
             return GestureAction.PassThrough
         }
+        // 边缘点击或短滑仅结束会话，不能提交一个不可见的选择。
+        if (!isMenuReady) return cancel()
         val selection = selectedIndex
         clearTracking(GesturePhase.Committing)
         val result = GestureAction.Commit(selection)
@@ -152,31 +139,28 @@ internal class CornerGestureEngine {
     }
 
     fun cancel(): GestureAction {
-        val wasClaimed = claimed
-        clearTracking(if (wasClaimed) GesturePhase.Cancelling else GesturePhase.Idle)
-        return if (wasClaimed) GestureAction.Cancel else GestureAction.PassThrough
+        val wasTracking = side != null
+        clearTracking(if (wasTracking) GesturePhase.Cancelling else GesturePhase.Idle)
+        return if (wasTracking) GestureAction.Cancel else GestureAction.PassThrough
     }
 
     fun setSelection(index: Int?) {
-        if (claimed) selectedIndex = index
+        if (isMenuReady) selectedIndex = index
     }
 
-    val isClaimed: Boolean
-        get() = claimed
+    val isMenuReady: Boolean
+        get() = phase == GesturePhase.Revealing || phase == GesturePhase.Selecting
 
     private fun reject(): GestureAction {
-        if (claimed) return cancel()
+        if (isMenuReady) return cancel()
         clearTracking(GesturePhase.Yielded)
         return GestureAction.PassThrough
     }
 
     private fun detectSide(x: Float, y: Float, config: CornerGestureConfig): CornerSide? {
-        return CornerTriggerRegion.detectSide(
+        return config.triggerRegion.detectSide(
             x = x,
             y = y,
-            displayWidth = config.displayWidth,
-            displayHeight = config.displayHeight,
-            radius = config.triggerRadius,
             leftEnabled = config.leftEnabled,
             rightEnabled = config.rightEnabled,
         )
@@ -193,7 +177,6 @@ internal class CornerGestureEngine {
         originX = 0f
         originY = 0f
         side = null
-        claimed = false
         downTimeMillis = 0L
     }
 }
