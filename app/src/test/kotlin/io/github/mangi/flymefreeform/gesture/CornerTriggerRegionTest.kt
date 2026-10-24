@@ -20,7 +20,7 @@ class CornerTriggerRegionTest {
     fun arcLengthUsesClampedDpAndThicknessDoesNotGrowWithRange() {
         assertEquals(48f, region(8, 2f).arcLength, 0f)
         assertEquals(168f, region(84, 2f).arcLength, 0f)
-        assertEquals(184f, region(200, 2f).arcLength, 0f)
+        assertEquals(320f, region(200, 2f).arcLength, 0f)
         assertEquals(24f, region(8, 2f).thickness, 0f)
         assertEquals(24f, region(200, 2f).thickness, 0f)
     }
@@ -122,16 +122,89 @@ class CornerTriggerRegionTest {
     }
 
     @Test
-    fun realDeviceCornerArcLengthBoundsAdaptToDisplayDensityAndReachFullQuarterCircle() {
+    fun realDeviceLengthRangeAllowsExtensionsAtDifferentDensities() {
         val region = CornerTriggerRegion.create(
             1440f, 3136f, CornerArc(203f, 2933f, 203f), CornerArc(1237f, 2933f, 203f), 84, 3.5f,
         )
-        assertEquals(92, region.maxArcLengthDp(3.5f))
-        assertEquals(80, region.maxArcLengthDp(4.0f))
+        assertEquals(160, region.maxArcLengthDp(3.5f))
+        assertEquals(160, region.maxArcLengthDp(4.0f))
         val subMaxBand = CornerArc(203f, 2933f, 203f).band(CornerSide.Left, 42f, 91 * 3.5f)
         val maxBand = CornerArc(203f, 2933f, 203f).band(CornerSide.Left, 42f, 92 * 3.5f)
         assertTrue(subMaxBand.sweepAngle < 90f)
         assertEquals(90f, maxBand.sweepAngle, 0f)
+    }
+
+    @Test
+    fun longerBandExtendsAlongBothEdgesWithoutWideningOrClaimingTheInterior() {
+        val region = CornerTriggerRegion.create(
+            1440f, 3136f, CornerArc(203f, 2933f, 203f), CornerArc(1237f, 2933f, 203f), 160, 3.5f, 10,
+        )
+        val band = requireNotNull(region.band(CornerSide.Left))
+        assertEquals((560f - 203f * (PI / 2).toFloat()) / 2f, band.extensionLength, 0.001f)
+        assertEquals(35f, band.outerRadius - band.innerRadius, 0f)
+        for ((x, y) in listOf(16f to 2850f, 280f to 3120f, 16f to 2933f, 203f to 3120f)) {
+            assertEquals(CornerSide.Left, region.detectSide(x, y, true, true))
+            assertEquals(CornerSide.Right, region.detectSide(1440f - x, y, true, true))
+            assertNull(region.detectSide(x, y, false, true))
+            assertNull(region.detectSide(1440f - x, y, true, false))
+        }
+        for ((x, y) in listOf(36f to 2850f, 280f to 3100f, 100f to 2900f, 0f to 3135f, 720f to 3120f)) {
+            assertNull(region.detectSide(x, y, true, true))
+            assertNull(region.detectSide(1440f - x, y, true, true))
+        }
+    }
+
+    @Test
+    fun extensionEndpointsAndInputWindowBoundsGrowAndShrinkWithLength() {
+        val region = CornerTriggerRegion.create(
+            1440f, 3136f, CornerArc(203f, 2933f, 203f), CornerArc(1237f, 2933f, 203f), 160, 3.5f, 10,
+        )
+        val left = requireNotNull(region.band(CornerSide.Left))
+        val right = requireNotNull(region.band(CornerSide.Right))
+        assertTrue(left.contains(16f, left.bounds.top))
+        assertTrue(left.contains(left.bounds.right, 3120f))
+        assertTrue(right.contains(1424f, right.bounds.top))
+        assertTrue(right.contains(right.bounds.left, 3120f))
+        assertNull(region.detectSide(16f, left.bounds.top - 1f, true, true))
+        assertNull(region.detectSide(left.bounds.right + 1f, 3120f, true, true))
+        assertNull(region.detectSide(1424f, right.bounds.top - 1f, true, true))
+        assertNull(region.detectSide(right.bounds.left - 1f, 3120f, true, true))
+        assertEquals(0f, left.bounds.left, 0f)
+        assertEquals(3136f, left.bounds.bottom, 0f)
+        assertEquals(1440f, right.bounds.right, 0f)
+        assertEquals(1440f - left.bounds.right, right.bounds.left, 0.001f)
+        val short = region.copy(arcLength = 84 * 3.5f)
+        assertNull(short.detectSide(16f, 2850f, true, true))
+        assertNull(short.detectSide(280f, 3120f, true, true))
+        assertEquals(203f, requireNotNull(short.band(CornerSide.Left)).bounds.right, 0f)
+        assertEquals(2933f, requireNotNull(short.band(CornerSide.Left)).bounds.top, 0f)
+    }
+
+    @Test
+    fun narrowDisplaysLimitExtensionsToTheirOwnHalfOfTheScreen() {
+        val region = CornerTriggerRegion.create(
+            140f, 200f, CornerArc(50f, 150f, 50f), CornerArc(90f, 150f, 50f), 160, 1f,
+        )
+        assertEquals(119, region.maxArcLengthDp(1f))
+        val left = requireNotNull(region.band(CornerSide.Left))
+        val right = requireNotNull(region.band(CornerSide.Right))
+        assertEquals(20f, left.extensionLength, 0.001f)
+        assertEquals(70f, left.bounds.right, 0.001f)
+        assertEquals(70f, right.bounds.left, 0.001f)
+        assertNull(region.detectSide(71f, 195f, true, false))
+        assertNull(region.detectSide(69f, 195f, false, true))
+        assertNull(region.detectSide(5f, 129f, true, true))
+    }
+
+    @Test
+    fun previewScalesExtensionsAndInputBoundsTogether() {
+        val arc = CornerArc(203f, 2933f, 203f)
+        val band = arc.band(CornerSide.Left, 35f, 560f)
+        val contour = requireNotNull(CornerBandContour.from(band, 0.5f, Offset(10f, 20f)))
+        assertEquals(CornerSide.Left, contour.side)
+        assertEquals(band.extensionLength * 0.5f, contour.extensionLength, 0f)
+        assertEquals(20f + band.bounds.top * 0.5f, contour.centerY - contour.extensionLength, 0.001f)
+        assertEquals(10f + band.bounds.right * 0.5f, contour.centerX + contour.extensionLength, 0.001f)
     }
 
     @Test

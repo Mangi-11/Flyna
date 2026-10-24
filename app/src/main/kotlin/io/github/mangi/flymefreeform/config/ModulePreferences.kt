@@ -29,7 +29,7 @@ internal object ModulePreferences {
     const val DEFAULT_PAUSE_IN_LANDSCAPE = true
     const val DEFAULT_PAUSE_IN_GAME_MODE = true
     const val MIN_CORNER_ARC_LENGTH_DP = 24
-    const val MAX_CORNER_ARC_LENGTH_DP = 92
+    const val MAX_CORNER_ARC_LENGTH_DP = 160
     const val MIN_CORNER_ARC_WIDTH_DP = 4
     const val MAX_CORNER_ARC_WIDTH_DP = 24
     const val MAX_PINNED_APPS = 6

@@ -192,11 +192,22 @@ class ModuleSettingsSnapshotTest {
         ).writeTo(preferences.edit()).commit()
 
         assertEquals(
-            92,
+            160,
             preferences.getInt(ModulePreferences.KEY_CORNER_ARC_LENGTH_DP, 0),
         )
         val restored = ModuleSettingsSnapshot.readFrom(preferences)
-        assertEquals(92, restored.cornerArcLengthDp)
+        assertEquals(160, restored.cornerArcLengthDp)
+    }
+
+    @Test
+    fun previousAndExtendedCornerLengthsRoundTripWithoutMigration() {
+        for (length in listOf(24, 84, 92, 120, 160)) {
+            val preferences = InMemoryPreferences(ModulePreferences.KEY_CORNER_ARC_LENGTH_DP to length)
+            val snapshot = ModuleSettingsSnapshot.readFrom(preferences)
+            assertEquals(length, snapshot.cornerArcLengthDp)
+            snapshot.writeTo(preferences.edit()).commit()
+            assertEquals(length, preferences.getInt(ModulePreferences.KEY_CORNER_ARC_LENGTH_DP, 0))
+        }
     }
 }
 

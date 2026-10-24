@@ -24,6 +24,8 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -137,6 +139,8 @@ internal data class CornerBandContour(
     val filletRadius: Float,
     val outerCornerAngleOffset: Float,
     val innerCornerAngleOffset: Float,
+    val side: CornerSide,
+    val extensionLength: Float,
 ) {
     val endAngle: Float
         get() = startAngle + sweepAngle
@@ -174,6 +178,8 @@ internal data class CornerBandContour(
                     filletRadius = 0f,
                     outerCornerAngleOffset = 0f,
                     innerCornerAngleOffset = 0f,
+                    side = band.side,
+                    extensionLength = band.extensionLength * scale,
                 )
             }
             val alphaOut =
@@ -191,6 +197,8 @@ internal data class CornerBandContour(
                     filletRadius = 0f,
                     outerCornerAngleOffset = 0f,
                     innerCornerAngleOffset = 0f,
+                    side = band.side,
+                    extensionLength = band.extensionLength * scale,
                 )
             }
             return CornerBandContour(
@@ -203,6 +211,8 @@ internal data class CornerBandContour(
                 filletRadius = candidateFillet,
                 outerCornerAngleOffset = alphaOut,
                 innerCornerAngleOffset = alphaIn,
+                side = band.side,
+                extensionLength = band.extensionLength * scale,
             )
         }
     }
@@ -378,7 +388,7 @@ internal fun CornerTriggerPreview(
             side = CornerSide.Left,
             enabled = leftEnabled,
             thicknessPx = thicknessPx,
-            arcLengthPx = arcLengthPx,
+            activeBand = geometry.band(CornerSide.Left, thicknessPx, arcLengthPx),
             scale = scale,
             origin = origin,
             visibility = currentVisibility,
@@ -396,7 +406,7 @@ internal fun CornerTriggerPreview(
             side = CornerSide.Right,
             enabled = rightEnabled,
             thicknessPx = thicknessPx,
-            arcLengthPx = arcLengthPx,
+            activeBand = geometry.band(CornerSide.Right, thicknessPx, arcLengthPx),
             scale = scale,
             origin = origin,
             visibility = currentVisibility,
@@ -417,7 +427,7 @@ private fun DrawScope.drawCornerBand(
     side: CornerSide,
     enabled: Boolean,
     thicknessPx: Float,
-    arcLengthPx: Float,
+    activeBand: CornerArcBand?,
     scale: Float,
     origin: Offset,
     visibility: Float,
@@ -430,9 +440,8 @@ private fun DrawScope.drawCornerBand(
     activePath: Path,
     capAccentPath: Path,
 ) {
-    if (arc == null) return
+    if (arc == null || activeBand == null) return
     val fullBand = arc.band(side, thicknessPx, arc.quarterArcLength)
-    val activeBand = arc.band(side, thicknessPx, arcLengthPx)
     val trackContour = CornerBandContour.from(fullBand, scale, origin) ?: return
     val activeContour = CornerBandContour.from(activeBand, scale, origin) ?: return
 
@@ -514,18 +523,55 @@ private fun DrawScope.drawCornerBand(
         } else {
             0.13f * visibility
         }
-    drawPath(
-        path = activePath,
-        brush =
-            Brush.radialGradient(
-                0f to Color.Transparent,
-                innerStop to baseTone.copy(alpha = innerAlpha),
-                midStop to baseTone.copy(alpha = midAlpha),
-                1f to baseTone.copy(alpha = outerAlpha),
-                center = center,
-                radius = activeContour.outerRadius,
-            ),
+    val arcFill = Brush.radialGradient(
+        0f to Color.Transparent,
+        innerStop to baseTone.copy(alpha = innerAlpha),
+        midStop to baseTone.copy(alpha = midAlpha),
+        1f to baseTone.copy(alpha = outerAlpha),
+        center = center,
+        radius = activeContour.outerRadius,
     )
+    if (activeContour.extensionLength > 0f) {
+        val c = activeContour
+        clipRect(
+            left = if (side == CornerSide.Left) c.centerX - c.outerRadius else c.centerX,
+            top = c.centerY,
+            right = if (side == CornerSide.Left) c.centerX else c.centerX + c.outerRadius,
+            bottom = c.centerY + c.outerRadius,
+        ) {
+            drawPath(path = activePath, brush = arcFill)
+        }
+    } else {
+        drawPath(path = activePath, brush = arcFill)
+    }
+
+    if (activeContour.extensionLength > 0f) {
+        // 直线段按距屏幕边缘的深度渐变，与圆弧在切点保持同色。
+        val c = activeContour
+        val direction = if (side == CornerSide.Left) -1f else 1f
+        val innerX = c.centerX + direction * c.innerRadius
+        val outerX = c.centerX + direction * c.outerRadius
+        val bottomEndX = c.centerX - direction * c.extensionLength
+        val stops = arrayOf(
+            0f to baseTone.copy(alpha = innerAlpha),
+            0.5f to baseTone.copy(alpha = midAlpha),
+            1f to baseTone.copy(alpha = outerAlpha),
+        )
+        clipPath(activePath) {
+            drawRect(
+                brush = Brush.linearGradient(*stops, start = Offset(innerX, c.centerY), end = Offset(outerX, c.centerY)),
+                topLeft = Offset(minOf(innerX, outerX), c.centerY - c.extensionLength),
+                size = Size(c.outerRadius - c.innerRadius, c.extensionLength),
+            )
+            drawRect(
+                brush = Brush.linearGradient(*stops,
+                    start = Offset(c.centerX, c.centerY + c.innerRadius),
+                    end = Offset(c.centerX, c.centerY + c.outerRadius)),
+                topLeft = Offset(minOf(c.centerX, bottomEndX), c.centerY + c.innerRadius),
+                size = Size(c.extensionLength, c.outerRadius - c.innerRadius),
+            )
+        }
+    }
 
     // 4. 连续细线包边：勾勒平滑切角轮廓。
     val contourAlpha = (if (enabled) (if (isDark) 0.56f else 0.48f) else 0.16f) * visibility
@@ -538,19 +584,34 @@ private fun DrawScope.drawCornerBand(
     if (!enabled) return
 
     // 5. 维度感知高光：调整弧宽时强化内沿边界弦线，调整弧长时点亮两端圆弧切角。
-    val innerArcSweep = (activeContour.sweepAngle - activeContour.innerCornerAngleOffset * 2f).coerceAtLeast(0f)
+    val innerInset = if (activeContour.extensionLength > 0f) 0f else activeContour.innerCornerAngleOffset
+    val innerArcSweep = (activeContour.sweepAngle - innerInset * 2f).coerceAtLeast(0f)
     if (innerArcSweep > 0.5f) {
         val innerHighlightAlpha = (0.58f + 0.34f * widthFocus) * visibility
         val innerHighlightWidth = (1.3f + 0.55f * widthFocus).dp.toPx()
         drawArc(
             color = primaryColor.copy(alpha = innerHighlightAlpha),
-            startAngle = activeContour.startAngle + activeContour.innerCornerAngleOffset,
+            startAngle = activeContour.startAngle + innerInset,
             sweepAngle = innerArcSweep,
             useCenter = false,
             topLeft = Offset(center.x - activeContour.innerRadius, center.y - activeContour.innerRadius),
             size = Size(activeContour.innerRadius * 2f, activeContour.innerRadius * 2f),
             style = Stroke(width = innerHighlightWidth, cap = StrokeCap.Round),
         )
+    }
+
+    if (activeContour.extensionLength > 0f) {
+        val c = activeContour
+        val direction = if (side == CornerSide.Left) -1f else 1f
+        val endInset = minOf(c.filletRadius, c.extensionLength)
+        val highlight = primaryColor.copy(alpha = (0.58f + 0.34f * widthFocus) * visibility)
+        val strokeWidth = (1.3f + 0.55f * widthFocus).dp.toPx()
+        drawLine(highlight,
+            Offset(c.centerX + direction * c.innerRadius, c.centerY),
+            Offset(c.centerX + direction * c.innerRadius, c.centerY - c.extensionLength + endInset), strokeWidth)
+        drawLine(highlight,
+            Offset(c.centerX, c.centerY + c.innerRadius),
+            Offset(c.centerX - direction * (c.extensionLength - endInset), c.centerY + c.innerRadius), strokeWidth)
     }
 
     if (lengthFocus > 0.02f && activeContour.hasRoundedCorners) {
@@ -565,6 +626,10 @@ private fun DrawScope.drawCornerBand(
 
 internal fun populateRoundedBandPath(path: Path, contour: CornerBandContour) {
     path.rewind()
+    if (contour.extensionLength > 0f) {
+        populateExtendedBandPath(path, contour)
+        return
+    }
     val cx = contour.centerX
     val cy = contour.centerY
     val outerR = contour.outerRadius
@@ -652,8 +717,50 @@ internal fun populateRoundedBandPath(path: Path, contour: CornerBandContour) {
     path.close()
 }
 
+private fun populateExtendedBandPath(path: Path, contour: CornerBandContour, capsOnly: Boolean = false) {
+    val cx = contour.centerX
+    val cy = contour.centerY
+    val outer = contour.outerRadius
+    val inner = contour.innerRadius
+    val extension = contour.extensionLength
+    val direction = if (contour.side == CornerSide.Left) -1f else 1f
+    val sideAngle = if (contour.side == CornerSide.Left) 180f else 0f
+    val capAngle = if (contour.side == CornerSide.Left) 0f else 180f
+    val r = minOf(contour.filletRadius, extension)
+    fun cap(x: Float, y: Float, start: Float) {
+        if (r > 0f) path.arcTo(Rect(x - r, y - r, x + r, y + r), start, direction * 90f, false)
+    }
+
+    if (!capsOnly) {
+        path.moveTo(cx + direction * outer, cy - extension + r)
+        path.lineTo(cx + direction * outer, cy)
+        path.arcTo(Rect(cx - outer, cy - outer, cx + outer, cy + outer), sideAngle, direction * 90f, false)
+        path.lineTo(cx - direction * (extension - r), cy + outer)
+    } else {
+        path.moveTo(cx - direction * (extension - r), cy + outer)
+    }
+    cap(cx - direction * (extension - r), cy + outer - r, 90f)
+    path.lineTo(cx - direction * extension, cy + inner + r)
+    cap(cx - direction * (extension - r), cy + inner + r, capAngle)
+    if (!capsOnly) {
+        path.lineTo(cx, cy + inner)
+        path.arcTo(Rect(cx - inner, cy - inner, cx + inner, cy + inner), 90f, -direction * 90f, false)
+        path.lineTo(cx + direction * inner, cy - extension + r)
+    } else {
+        path.moveTo(cx + direction * inner, cy - extension + r)
+    }
+    cap(cx + direction * (inner + r), cy - extension + r, capAngle)
+    path.lineTo(cx + direction * (outer - r), cy - extension)
+    cap(cx + direction * (outer - r), cy - extension + r, 270f)
+    if (!capsOnly) path.close()
+}
+
 private fun populateEndCapsPath(path: Path, contour: CornerBandContour) {
     path.rewind()
+    if (contour.extensionLength > 0f) {
+        populateExtendedBandPath(path, contour, capsOnly = true)
+        return
+    }
     if (!contour.hasRoundedCorners) return
     val cx = contour.centerX
     val cy = contour.centerY

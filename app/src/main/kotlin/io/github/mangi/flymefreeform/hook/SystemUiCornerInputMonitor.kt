@@ -18,9 +18,9 @@ import android.view.WindowManager
 import io.github.libxposed.api.XposedModule
 import io.github.mangi.flymefreeform.config.ModuleSettingsSnapshot
 import io.github.mangi.flymefreeform.gesture.AdaptiveCornerGestureConfig
-import io.github.mangi.flymefreeform.gesture.CornerArc
 import io.github.mangi.flymefreeform.gesture.CornerGestureConfig
 import io.github.mangi.flymefreeform.gesture.CornerGestureEngine
+import io.github.mangi.flymefreeform.gesture.CornerInputBounds
 import io.github.mangi.flymefreeform.gesture.CornerInputHandoff
 import io.github.mangi.flymefreeform.gesture.CornerSide
 import io.github.mangi.flymefreeform.gesture.CornerStreamIdentity
@@ -136,22 +136,22 @@ internal class SystemUiCornerInputMonitor(
 
     private fun updateSide(side: CornerSide, shouldExist: Boolean, region: CornerTriggerRegion?) {
         val existing = bindings[side]
-        val arc = if (side == CornerSide.Left) region?.left else region?.right
-        if (!shouldExist || region == null || arc == null) {
+        val bounds = region?.band(side)?.bounds
+        if (!shouldExist || region == null || bounds == null) {
             if (existing != null) removeBinding(side, existing)
             return
         }
 
         if (existing == null) {
-            addBinding(side, region, arc)
+            addBinding(side, region, bounds)
         } else {
             // 显示几何改变时终止旧坐标系中的流，不能让旧起点驱动新位置上的菜单。
             if (existing.view.triggerRegion != region) existing.view.resetTracking()
             existing.view.triggerRegion = region
-            if (existing.arc == arc) return
-            existing.arc = arc
+            if (existing.bounds == bounds) return
+            existing.bounds = bounds
             try {
-                windowManager.updateViewLayout(existing.view, createLayoutParams(side, arc))
+                windowManager.updateViewLayout(existing.view, createLayoutParams(side, bounds))
             } catch (exception: ReflectiveOperationException) {
                 module.log(Log.WARN, TAG, "SYSTEMUI_CORNER_SPY_UPDATE_FAILED", exception)
                 removeBinding(side, existing)
@@ -162,7 +162,7 @@ internal class SystemUiCornerInputMonitor(
         }
     }
 
-    private fun addBinding(side: CornerSide, region: CornerTriggerRegion, arc: CornerArc) {
+    private fun addBinding(side: CornerSide, region: CornerTriggerRegion, bounds: CornerInputBounds) {
         val view =
             CornerGestureView(
                 context = context,
@@ -178,8 +178,8 @@ internal class SystemUiCornerInputMonitor(
                 onStreamFinished = ::finishStream,
             )
         try {
-            windowManager.addView(view, createLayoutParams(side, arc))
-            bindings[side] = CornerBinding(view, arc)
+            windowManager.addView(view, createLayoutParams(side, bounds))
+            bindings[side] = CornerBinding(view, bounds)
         } catch (exception: ReflectiveOperationException) {
             module.log(Log.WARN, TAG, "SYSTEMUI_CORNER_SPY_ADD_FAILED", exception)
         } catch (exception: RuntimeException) {
@@ -242,10 +242,10 @@ internal class SystemUiCornerInputMonitor(
         }
     }
 
-    private fun createLayoutParams(side: CornerSide, arc: CornerArc): WindowManager.LayoutParams =
+    private fun createLayoutParams(side: CornerSide, bounds: CornerInputBounds): WindowManager.LayoutParams =
         WindowManager.LayoutParams(
-            ceil(arc.radius).toInt().coerceAtLeast(1),
-            ceil(arc.radius).toInt().coerceAtLeast(1),
+            (ceil(bounds.right) - floor(bounds.left)).toInt().coerceAtLeast(1),
+            (ceil(bounds.bottom) - floor(bounds.top)).toInt().coerceAtLeast(1),
             CORNER_GESTURE_WINDOW_TYPE,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
@@ -254,8 +254,8 @@ internal class SystemUiCornerInputMonitor(
             PixelFormat.TRANSPARENT,
         ).apply {
             gravity = Gravity.TOP or Gravity.LEFT
-            x = floor(if (side == CornerSide.Left) arc.centerX - arc.radius else arc.centerX).toInt()
-            y = floor(arc.centerY).toInt()
+            x = floor(bounds.left).toInt()
+            y = floor(bounds.top).toInt()
             title = "$CORNER_INPUT_CHANNEL_TITLE-${side.name}"
             layoutInDisplayCutoutMode =
                 WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
@@ -275,7 +275,7 @@ internal class SystemUiCornerInputMonitor(
 
     private data class CornerBinding(
         val view: CornerGestureView,
-        var arc: CornerArc,
+        var bounds: CornerInputBounds,
     )
 
     @SuppressLint("ClickableViewAccessibility")
@@ -342,7 +342,7 @@ internal class SystemUiCornerInputMonitor(
                     latestY = event.rawY
                     latestTime = event.eventTime
                     tracking = true
-                    // 仅在实际圆角窄弧带命中的 DOWN 抢占，不等待 MOVE 或跨进程准备确认。
+                    // 仅在贴边触发带命中的 DOWN 抢占，不等待 MOVE 或跨进程准备确认。
                     if (!handoff.claimInput { pilfer(this) }) {
                         cancelStream()
                         onStreamFinished()
