@@ -3,10 +3,13 @@ package io.github.mangi.flymefreeform.ui
 import android.content.ActivityNotFoundException
 import androidx.annotation.StringRes
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.calculateEndPadding
 import androidx.compose.foundation.layout.calculateStartPadding
@@ -43,9 +46,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.stringResource
@@ -57,6 +65,7 @@ import io.github.mangi.flymefreeform.config.OutsideTapCloseMode
 import io.github.mangi.flymefreeform.framework.FrameworkConnectionIssue
 import io.github.mangi.flymefreeform.framework.FrameworkConnectionState
 import io.github.mangi.flymefreeform.framework.FrameworkConnectionStatus
+import io.github.mangi.flymefreeform.platform.DisplayCornerGeometry
 import io.github.mangi.flymefreeform.ui.component.TopBarBackdrop
 import io.github.mangi.flymefreeform.ui.component.captureForTopBar
 import io.github.mangi.flymefreeform.ui.component.rememberTopBarBackdrop
@@ -68,12 +77,12 @@ import top.yukonga.miuix.kmp.basic.DropdownItem
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.basic.Slider
 import top.yukonga.miuix.kmp.basic.SmallTopAppBar
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.preference.OverlaySpinnerPreference
-import top.yukonga.miuix.kmp.preference.SliderPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
@@ -97,13 +106,34 @@ internal fun ControlScreen(
     val backdrop = rememberTopBarBackdrop()
     val topBarColor = topBarContainerColor(backdrop)
     val featuresEnabled = state.canChangeSettings && state.settings.enabled
-    val cornerArcLengthPreviewDp = remember { mutableStateOf<Int?>(null) }
-    val cornerArcWidthPreviewDp = remember { mutableStateOf<Int?>(null) }
+    val context = LocalContext.current
+    val configuration = LocalConfiguration.current
+    val cornerGeometry = remember(context, configuration) {
+        DisplayCornerGeometry.read(
+            context,
+            ModulePreferences.DEFAULT_CORNER_ARC_LENGTH_DP,
+            ModulePreferences.DEFAULT_CORNER_ARC_WIDTH_DP,
+        )
+    }
+    val pixelsPerDp =
+        cornerGeometry?.let { it.thickness / ModulePreferences.DEFAULT_CORNER_ARC_WIDTH_DP }
+            ?: context.resources.displayMetrics.density
+    val arcLengthRange = remember(cornerGeometry, pixelsPerDp) {
+        val maxDp = cornerGeometry?.maxArcLengthDp(pixelsPerDp) ?: ModulePreferences.MAX_CORNER_ARC_LENGTH_DP
+        ModulePreferences.MIN_CORNER_ARC_LENGTH_DP..maxDp
+    }
+    val previewState = remember {
+        CornerTriggerPreviewState(
+            initialLengthDp = state.settings.cornerArcLengthDp.coerceIn(arcLengthRange),
+            initialWidthDp = state.settings.cornerArcWidthDp,
+        )
+    }
+    previewState.syncConfirmed(
+        confirmedLengthDp = state.settings.cornerArcLengthDp.coerceIn(arcLengthRange),
+        confirmedWidthDp = state.settings.cornerArcWidthDp,
+    )
     LaunchedEffect(featuresEnabled) {
-        if (!featuresEnabled) {
-            cornerArcLengthPreviewDp.value = null
-            cornerArcWidthPreviewDp.value = null
-        }
+        if (!featuresEnabled) previewState.dismiss()
     }
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val windowWidth = maxWidth
@@ -166,11 +196,16 @@ internal fun ControlScreen(
                         SettingsCard(
                             state = state,
                             featuresEnabled = featuresEnabled,
+                            arcLengthRange = arcLengthRange,
                             onCornerSidesChange = onCornerSidesChange,
                             onCornerArcLengthChange = onCornerArcLengthChange,
-                            onArcLengthPreviewChange = { cornerArcLengthPreviewDp.value = it },
+                            onArcLengthPreviewStart = previewState::startLengthPreview,
+                            onArcLengthPreviewUpdate = previewState::updateLengthPreview,
+                            onArcLengthPreviewFinish = previewState::finishLengthPreview,
                             onCornerArcWidthChange = onCornerArcWidthChange,
-                            onArcWidthPreviewChange = { cornerArcWidthPreviewDp.value = it },
+                            onArcWidthPreviewStart = previewState::startWidthPreview,
+                            onArcWidthPreviewUpdate = previewState::updateWidthPreview,
+                            onArcWidthPreviewFinish = previewState::finishWidthPreview,
                             onNavigateToPinnedApps = onNavigateToPinnedApps,
                         )
                     }
@@ -196,10 +231,8 @@ internal fun ControlScreen(
             }
         }
         CornerTriggerPreview(
-            lengthPreview = cornerArcLengthPreviewDp,
-            widthPreview = cornerArcWidthPreviewDp,
-            confirmedLengthDp = state.settings.cornerArcLengthDp,
-            confirmedWidthDp = state.settings.cornerArcWidthDp,
+            state = previewState,
+            geometry = cornerGeometry,
             leftEnabled = state.settings.leftCornerEnabled,
             rightEnabled = state.settings.rightCornerEnabled,
         )
@@ -336,11 +369,16 @@ private fun RuntimeCard(
 private fun SettingsCard(
     state: FrameworkConnectionState,
     featuresEnabled: Boolean,
+    arcLengthRange: IntRange,
     onCornerSidesChange: (Boolean, Boolean) -> Unit,
     onCornerArcLengthChange: (Int) -> Unit,
     onCornerArcWidthChange: (Int) -> Unit,
-    onArcLengthPreviewChange: (Int?) -> Unit,
-    onArcWidthPreviewChange: (Int?) -> Unit,
+    onArcLengthPreviewStart: (Int) -> Unit,
+    onArcLengthPreviewUpdate: (Int) -> Unit,
+    onArcLengthPreviewFinish: () -> Unit,
+    onArcWidthPreviewStart: (Int) -> Unit,
+    onArcWidthPreviewUpdate: (Int) -> Unit,
+    onArcWidthPreviewFinish: () -> Unit,
     onNavigateToPinnedApps: () -> Unit,
 ) {
     val selectedSideIndex =
@@ -383,9 +421,10 @@ private fun SettingsCard(
             isUpdating = state.isUpdating,
             enabled = featuresEnabled,
             title = stringResource(R.string.corner_trigger_range_title),
-            summary = stringResource(R.string.corner_trigger_range_summary),
-            valueRange = ModulePreferences.MIN_CORNER_ARC_LENGTH_DP..ModulePreferences.MAX_CORNER_ARC_LENGTH_DP,
-            onPreviewChange = onArcLengthPreviewChange,
+            valueRange = arcLengthRange,
+            onPreviewStart = onArcLengthPreviewStart,
+            onPreviewUpdate = onArcLengthPreviewUpdate,
+            onPreviewFinish = onArcLengthPreviewFinish,
             onCommit = onCornerArcLengthChange,
         )
         RemoteDpSliderPreference(
@@ -394,9 +433,10 @@ private fun SettingsCard(
             isUpdating = state.isUpdating,
             enabled = featuresEnabled,
             title = stringResource(R.string.corner_arc_width_title),
-            summary = stringResource(R.string.corner_arc_width_summary),
             valueRange = ModulePreferences.MIN_CORNER_ARC_WIDTH_DP..ModulePreferences.MAX_CORNER_ARC_WIDTH_DP,
-            onPreviewChange = onArcWidthPreviewChange,
+            onPreviewStart = onArcWidthPreviewStart,
+            onPreviewUpdate = onArcWidthPreviewUpdate,
+            onPreviewFinish = onArcWidthPreviewFinish,
             onCommit = onCornerArcWidthChange,
         )
         ArrowPreference(
@@ -416,45 +456,88 @@ private fun RemoteDpSliderPreference(
     isUpdating: Boolean,
     enabled: Boolean,
     title: String,
-    summary: String,
     valueRange: IntRange,
-    onPreviewChange: (Int?) -> Unit,
+    onPreviewStart: (Int) -> Unit,
+    onPreviewUpdate: (Int) -> Unit,
+    onPreviewFinish: () -> Unit,
     onCommit: (Int) -> Unit,
 ) {
     var draftValue by rememberSaveable { mutableFloatStateOf(confirmedValue.coerceIn(valueRange).toFloat()) }
     var isDragging by remember { mutableStateOf(false) }
-    val currentPreviewChange by rememberUpdatedState(onPreviewChange)
-    DisposableEffect(Unit) { onDispose { currentPreviewChange(null) } }
+    val currentPreviewStart by rememberUpdatedState(onPreviewStart)
+    val currentPreviewFinish by rememberUpdatedState(onPreviewFinish)
+    DisposableEffect(Unit) { onDispose { currentPreviewFinish() } }
     LaunchedEffect(confirmedValue, isUpdating, enabled, valueRange) {
         if (!enabled) {
             isDragging = false
-            onPreviewChange(null)
+            onPreviewFinish()
         }
         if (!isDragging && !isUpdating) draftValue = confirmedValue.coerceIn(valueRange).toFloat()
     }
-    SliderPreference(
-        value = draftValue,
-        onValueChange = { value ->
-            isDragging = true
-            val draft = value.roundToInt().coerceIn(valueRange)
-            draftValue = draft.toFloat()
-            onPreviewChange(draft)
-        },
+    val valueText = stringResource(R.string.dp_value, draftValue.roundToInt())
+    BasicComponent(
         title = title,
-        summary = summary,
-        valueText = stringResource(R.string.dp_value, draftValue.roundToInt()),
-        enabled = enabled,
         startAction = { PreferenceIcon(icon, enabled) },
-        valueRange = valueRange.first.toFloat()..valueRange.last.toFloat(),
-        steps = (valueRange.last - valueRange.first - 1).coerceAtLeast(0),
-        onValueChangeFinished = {
-            isDragging = false
-            onPreviewChange(null)
-            val committed =
-                draftValue.roundToInt().coerceIn(valueRange)
-            draftValue = committed.toFloat()
-            if (committed != confirmedValue) onCommit(committed)
+        endActions = {
+            Row(
+                modifier =
+                    Modifier
+                        .padding(end = 8.dp)
+                        .align(Alignment.CenterVertically)
+                        .weight(1f, fill = false),
+            ) {
+                Text(
+                    text = valueText,
+                    fontSize = MiuixTheme.textStyles.body2.fontSize,
+                    color =
+                        if (enabled) MiuixTheme.colorScheme.onSurfaceVariantActions
+                        else MiuixTheme.colorScheme.disabledOnSecondaryVariant,
+                )
+            }
         },
+        bottomAction = {
+            Slider(
+                value = draftValue,
+                onValueChange = { value ->
+                    isDragging = true
+                    val draft = value.roundToInt().coerceIn(valueRange)
+                    draftValue = draft.toFloat()
+                    onPreviewUpdate(draft)
+                },
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .pointerInput(enabled, valueRange) {
+                            if (!enabled) return@pointerInput
+                            awaitEachGesture {
+                                awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                                currentPreviewStart(draftValue.roundToInt().coerceIn(valueRange))
+                                do {
+                                    val event = awaitPointerEvent(pass = PointerEventPass.Final)
+                                    if (!isDragging && event.changes.any { it.isConsumed }) {
+                                        currentPreviewFinish()
+                                        break
+                                    }
+                                } while (event.changes.any { it.pressed })
+                                if (!isDragging) {
+                                    currentPreviewFinish()
+                                }
+                            }
+                        },
+                enabled = enabled,
+                valueRange = valueRange.first.toFloat()..valueRange.last.toFloat(),
+                steps = (valueRange.last - valueRange.first - 1).coerceAtLeast(0),
+                onValueChangeFinished = {
+                    isDragging = false
+                    onPreviewFinish()
+                    val committed =
+                        draftValue.roundToInt().coerceIn(valueRange)
+                    draftValue = committed.toFloat()
+                    if (committed != confirmedValue) onCommit(committed)
+                },
+            )
+        },
+        enabled = enabled,
     )
 }
 

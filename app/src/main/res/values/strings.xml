@@ -32,9 +32,7 @@
     <string name="corner_trigger_side_left">仅左下角</string>
     <string name="corner_trigger_side_right">仅右下角</string>
     <string name="corner_trigger_range_title">弧长</string>
-    <string name="corner_trigger_range_summary">沿屏幕圆角延伸的长度，最多覆盖完整圆角</string>
     <string name="corner_arc_width_title">弧宽</string>
-    <string name="corner_arc_width_summary">从屏幕边缘向内的宽度；拖动时预览，小窗内等比缩放</string>
     <string name="dp_value">%1$d dp</string>
     <string name="radial_apps_title">扇形快捷项</string>
     <string name="radial_apps_recent_summary">首次使用时默认展示最近使用的六个应用</string>

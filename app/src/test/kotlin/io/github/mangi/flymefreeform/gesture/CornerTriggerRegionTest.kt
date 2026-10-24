@@ -1,7 +1,11 @@
 package io.github.mangi.flymefreeform.gesture
 
+import androidx.compose.ui.geometry.Offset
+import io.github.mangi.flymefreeform.ui.CornerBandContour
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.math.PI
 import kotlin.math.cos
@@ -16,7 +20,7 @@ class CornerTriggerRegionTest {
     fun arcLengthUsesClampedDpAndThicknessDoesNotGrowWithRange() {
         assertEquals(48f, region(8, 2f).arcLength, 0f)
         assertEquals(168f, region(84, 2f).arcLength, 0f)
-        assertEquals(320f, region(200, 2f).arcLength, 0f)
+        assertEquals(184f, region(200, 2f).arcLength, 0f)
         assertEquals(24f, region(8, 2f).thickness, 0f)
         assertEquals(24f, region(200, 2f).thickness, 0f)
     }
@@ -50,7 +54,7 @@ class CornerTriggerRegionTest {
         assertEquals(CornerSide.Left, region(24).detectSide(16f, 1984f, true, true))
         assertNull(region(24).detectSide(2f, 1951f, true, true))
         assertEquals(CornerSide.Left, region(84).detectSide(2f, 1951f, true, true))
-        for (range in listOf(24, 84, 160)) {
+        for (range in listOf(24, 84, 92)) {
             assertNull(region(range).detectSide(25f, 1975f, true, true))
         }
     }
@@ -115,5 +119,30 @@ class CornerTriggerRegionTest {
         assertEquals(161f, strokeRadius - strokeWidth / 2f, 0f)
         assertEquals(90f, band.startAngle, 0f)
         assertEquals(90f, band.sweepAngle, 0f)
+    }
+
+    @Test
+    fun realDeviceCornerArcLengthBoundsAdaptToDisplayDensityAndReachFullQuarterCircle() {
+        val region = CornerTriggerRegion.create(
+            1440f, 3136f, CornerArc(203f, 2933f, 203f), CornerArc(1237f, 2933f, 203f), 84, 3.5f,
+        )
+        assertEquals(92, region.maxArcLengthDp(3.5f))
+        assertEquals(80, region.maxArcLengthDp(4.0f))
+        val subMaxBand = CornerArc(203f, 2933f, 203f).band(CornerSide.Left, 42f, 91 * 3.5f)
+        val maxBand = CornerArc(203f, 2933f, 203f).band(CornerSide.Left, 42f, 92 * 3.5f)
+        assertTrue(subMaxBand.sweepAngle < 90f)
+        assertEquals(90f, maxBand.sweepAngle, 0f)
+    }
+
+    @Test
+    fun previewContourKeepsRoundedFilletsInsideBandAngularAndRadialBounds() {
+        val band = CornerArc(203f, 2933f, 203f).band(CornerSide.Left, 42f, 294f)
+        val contour = CornerBandContour.from(band, scale = 1f, origin = Offset.Zero)
+        assertNotNull(contour)
+        requireNotNull(contour)
+        assertTrue(contour.hasRoundedCorners)
+        assertTrue(contour.filletRadius > 0f && contour.filletRadius < 21f)
+        assertTrue(contour.outerCornerAngleOffset * 2f < contour.sweepAngle)
+        assertTrue(contour.innerCornerAngleOffset * 2f < contour.sweepAngle)
     }
 }

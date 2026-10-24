@@ -74,9 +74,9 @@ class ModuleSettingsSnapshotTest {
     fun arcWidthIsClampedOnReadAndWriteIndependentlyOfLength() {
         val preferences = InMemoryPreferences(ModulePreferences.KEY_CORNER_ARC_WIDTH_DP to -20)
         assertEquals(ModulePreferences.MIN_CORNER_ARC_WIDTH_DP, ModuleSettingsSnapshot.readFrom(preferences).cornerArcWidthDp)
-        ModuleSettingsSnapshot(cornerArcLengthDp = 96, cornerArcWidthDp = 200).writeTo(preferences.edit()).commit()
+        ModuleSettingsSnapshot(cornerArcLengthDp = 88, cornerArcWidthDp = 200).writeTo(preferences.edit()).commit()
         val updated = ModuleSettingsSnapshot.readFrom(preferences)
-        assertEquals(96, updated.cornerArcLengthDp)
+        assertEquals(88, updated.cornerArcLengthDp)
         assertEquals(ModulePreferences.MAX_CORNER_ARC_WIDTH_DP, updated.cornerArcWidthDp)
     }
 
@@ -192,11 +192,11 @@ class ModuleSettingsSnapshotTest {
         ).writeTo(preferences.edit()).commit()
 
         assertEquals(
-            160,
+            92,
             preferences.getInt(ModulePreferences.KEY_CORNER_ARC_LENGTH_DP, 0),
         )
         val restored = ModuleSettingsSnapshot.readFrom(preferences)
-        assertEquals(160, restored.cornerArcLengthDp)
+        assertEquals(92, restored.cornerArcLengthDp)
     }
 }
 

@@ -3,10 +3,14 @@ package io.github.mangi.flymefreeform.gesture
 import io.github.mangi.flymefreeform.config.ModulePreferences
 import kotlin.math.PI
 import kotlin.math.atan2
+import kotlin.math.ceil
 import kotlin.math.min
 
 /** 系统圆角在物理显示坐标中的四分之一圆近似，不包含 Android 对象。 */
 internal data class CornerArc(val centerX: Float, val centerY: Float, val radius: Float) {
+    val quarterArcLength: Float
+        get() = (radius * (PI / 2.0)).toFloat()
+
     fun band(side: CornerSide, thickness: Float, arcLength: Float): CornerArcBand {
         // 弧长以圆角中点为中心展开；再大的范围也不会延伸到底边或侧边直线段。
         val halfAngle = min(PI / 4, arcLength / (2.0 * radius))
@@ -49,6 +53,17 @@ internal data class CornerTriggerRegion(
         if (leftEnabled && left?.band(CornerSide.Left, thickness, arcLength)?.contains(x, y) == true) return CornerSide.Left
         if (rightEnabled && right?.band(CornerSide.Right, thickness, arcLength)?.contains(x, y) == true) return CornerSide.Right
         return null
+    }
+
+    /** 当前显示圆角对应的四分之一圆弧长上限（dp），避免滑块高段超出圆角范围后无响应。 */
+    fun maxArcLengthDp(density: Float): Int {
+        val safeDensity = density.takeIf { it.isFinite() && it > 0f } ?: return ModulePreferences.MAX_CORNER_ARC_LENGTH_DP
+        val maxQuarterArcLength = maxOf(left?.quarterArcLength ?: 0f, right?.quarterArcLength ?: 0f)
+        if (maxQuarterArcLength <= 0f) return ModulePreferences.MAX_CORNER_ARC_LENGTH_DP
+        return ceil(maxQuarterArcLength / safeDensity).toInt().coerceIn(
+            ModulePreferences.MIN_CORNER_ARC_LENGTH_DP,
+            ModulePreferences.MAX_CORNER_ARC_LENGTH_DP,
+        )
     }
 
     companion object {
