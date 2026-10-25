@@ -114,8 +114,8 @@ internal class CornerGestureEngine {
         }
         if (!isMenuReady) {
             if (eventTimeMillis < downTimeMillis) return reject()
-            // 边缘 DOWN 已由输入窗口接管；这里只排除点击抖动，不再裁决输入方向归属。
-            if (upward < config.activationDistance) return GestureAction.Ignore
+            // 边缘 DOWN 已被接管；向内横滑与上滑共用展开阈值，避免横滑只吞输入却不显示菜单。
+            if (max(inward, upward) < config.activationDistance) return GestureAction.Ignore
             phase = GesturePhase.Revealing
             return GestureAction.Activate(activeSide, originX, originY, x, y)
         }

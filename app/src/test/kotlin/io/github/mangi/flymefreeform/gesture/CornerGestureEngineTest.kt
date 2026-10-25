@@ -52,11 +52,40 @@ class CornerGestureEngineTest {
     }
 
     @Test
-    fun horizontalStartMayTurnUpwardInsideTheAlreadyOwnedStream() {
-        val engine = CornerGestureEngine()
-        engine.down(0, 16f, 1984f, config, 100L)
-        assertEquals(GestureAction.Ignore, engine.move(0, 1, 40f, 1984f, config, 110L))
-        assertTrue(engine.move(0, 1, 40f, 1976f, config, 120L) is GestureAction.Activate)
+    fun inwardHorizontalSwipeRevealsAtTheSameThresholdOnEitherCorner() {
+        for (right in listOf(false, true)) {
+            val engine = CornerGestureEngine()
+            val x = if (right) 984f else 16f
+            val direction = if (right) -1f else 1f
+            engine.down(0, x, 1984f, config, 100L)
+            assertEquals(GestureAction.Ignore, engine.move(0, 1, x + direction * 7f, 1984f, config, 110L))
+            assertFalse(engine.isMenuReady)
+            val action = engine.move(0, 1, x + direction * 8f, 1984f, config, 120L)
+            assertTrue(action is GestureAction.Activate)
+            assertEquals(if (right) CornerSide.Right else CornerSide.Left, (action as GestureAction.Activate).side)
+            assertTrue(engine.move(0, 1, x + direction * 24f, 1984f, config, 130L) is GestureAction.Update)
+            assertTrue(engine.move(0, 1, x + direction * 24f, 1976f, config, 140L) is GestureAction.Update)
+            assertTrue(engine.up(0) is GestureAction.Commit)
+        }
+    }
+
+    @Test
+    fun horizontalJitterCannotCommitAndDownwardOrOutwardSwipesStillYield() {
+        for (right in listOf(false, true)) {
+            val x = if (right) 984f else 16f
+            val direction = if (right) -1f else 1f
+            val shortSwipe = CornerGestureEngine()
+            shortSwipe.down(0, x, 1984f, config, 100L)
+            assertEquals(GestureAction.Ignore, shortSwipe.move(0, 1, x + direction * 7f, 1984f, config, 110L))
+            assertEquals(GestureAction.Cancel, shortSwipe.up(0))
+            for ((dx, dy) in listOf(-10f to 0f, 0f to 10f, 24f to 10f)) {
+                val engine = CornerGestureEngine()
+                engine.down(0, x, 1984f, config, 100L)
+                engine.move(0, 1, x + direction * dx, 1984f + dy, config, 110L)
+                assertEquals(GesturePhase.Yielded, engine.phase)
+                assertFalse(engine.isMenuReady)
+            }
+        }
     }
 
     @Test

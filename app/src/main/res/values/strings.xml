@@ -27,7 +27,7 @@
     <string name="module_enabled_summary_updating">正在同步配置</string>
     <string name="module_enabled_summary_scope">补全所需作用域后可更改</string>
     <string name="corner_trigger_side_title">触发位置</string>
-    <string name="corner_trigger_side_summary">从圆角弧带上滑呼出菜单，弧带内点击由小窗接管</string>
+    <string name="corner_trigger_side_summary">从圆角弧带向内或向上滑出菜单，弧带内点击由小窗接管</string>
     <string name="corner_trigger_side_both">左右下角</string>
     <string name="corner_trigger_side_left">仅左下角</string>
     <string name="corner_trigger_side_right">仅右下角</string>

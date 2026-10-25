@@ -8,6 +8,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.SystemClock
+import android.os.Trace
 import android.util.Log
 import android.view.Gravity
 import android.view.InputDevice
@@ -73,15 +74,16 @@ internal class SystemUiCornerInputMonitor(
     private var settings = ModuleSettingsSnapshot(enabled = false)
     private var pendingSettings: ModuleSettingsSnapshot? = null
     private var lastPilferFailureAt = -PILFER_FAILURE_LOG_INTERVAL_MS
+    private val sideBackHook = SystemUiSideBackHook(module) { environmentState.isGestureAllowed() }
 
     private val inputClient: SystemUiCornerInputClient = SystemUiCornerInputClient(
         context, mainHandler,
         log = { priority, code, error -> module.log(priority, TAG, code, error) },
         onDisconnected = {
             bindings.values.forEach { it.view.cancelStream() }
-            availabilityPublisher.publish()
+            publishReadiness()
         },
-        onReady = { availabilityPublisher.publish() },
+        onReady = ::publishReadiness,
     )
     private val availabilityPublisher: CornerInputAvailabilityPublisher by lazy {
         CornerInputAvailabilityPublisher(
@@ -99,6 +101,7 @@ internal class SystemUiCornerInputMonitor(
             bindings.containsKey(side) && canClaim(side)
         }.also { it.install(context.classLoader) }
         environmentState.start(context)
+        sideBackHook.install(context.classLoader)
         environmentState.observe { applySettings(configuration.snapshot) }
         configuration.observe { snapshot ->
             if (Looper.myLooper() == Looper.getMainLooper()) {
@@ -120,6 +123,7 @@ internal class SystemUiCornerInputMonitor(
 
     private fun applySettings(snapshot: ModuleSettingsSnapshot) {
         ensureMainThread()
+        sideBackHook.update(null, false, false)
         settings = snapshot
         pendingSettings = null
         val allowed = environmentState.isGestureAllowed(refreshKeyguard = true)
@@ -131,6 +135,15 @@ internal class SystemUiCornerInputMonitor(
         } else null
         updateSide(CornerSide.Left, allowed && snapshot.leftCornerEnabled, region)
         updateSide(CornerSide.Right, allowed && snapshot.rightCornerEnabled, region)
+        publishReadiness()
+    }
+
+    private fun publishReadiness() {
+        ensureMainThread()
+        val region = if (isOwnerReady() && environmentState.isGestureAllowed()) {
+            bindings.values.firstOrNull()?.view?.triggerRegion
+        } else null
+        sideBackHook.update(region, settings.leftCornerEnabled, settings.rightCornerEnabled)
         availabilityPublisher.publish()
     }
 
@@ -218,7 +231,9 @@ internal class SystemUiCornerInputMonitor(
             val inputToken =
                 viewRoot.javaClass.getMethod("getInputToken").invoke(viewRoot) as? IBinder
                     ?: return false
-            pilferPointersMethod.invoke(inputManager, inputToken)
+            Trace.beginSection("FlymeFreeform#cornerPilfer")
+            try { pilferPointersMethod.invoke(inputManager, inputToken) }
+            finally { Trace.endSection() }
             true
         } catch (exception: ReflectiveOperationException) {
             logPilferFailure(exception)

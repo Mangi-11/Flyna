@@ -42,7 +42,10 @@ internal class SystemUiCornerInputClient(
     private val choreographer = Choreographer.getInstance()
     private val moveFrame = Choreographer.FrameCallback { flushMove() }
     private val prepareTimeout = Runnable {
-        current?.takeUnless { it.prepared }?.let { cancel(it.id) }
+        current?.takeUnless { it.prepared }?.let {
+            report("CORNER_INPUT_PREPARE_TIMEOUT", null)
+            cancel(it.id)
+        }
     }
     private val sessionTimeout = Runnable {
         current?.let {
@@ -262,7 +265,7 @@ internal class SystemUiCornerInputClient(
         }
     }
 
-    private fun report(code: String, exception: Throwable) {
+    private fun report(code: String, exception: Throwable?) {
         val now = SystemClock.uptimeMillis()
         if (now - lastFailureAt < RECONNECT_INTERVAL_MS) return
         lastFailureAt = now
