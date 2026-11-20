@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="app/src/main/res/drawable-nodpi/ic_launcher_mark.png" width="112" alt="Flyme 小窗图标" />
+  <img src="app/src/main/res/drawable-nodpi/ic_launcher_mark.png" width="112" alt="Flyna 图标" />
 </p>
 
-<h1 align="center">Flyme 小窗（FlymeFreeform）</h1>
+<h1 align="center">Flyna</h1>
 
 <p align="center">
   <img src="https://img.shields.io/badge/ROM-ColorOS-00A862" alt="面向 ColorOS" />
@@ -17,7 +17,7 @@
 ## 预览
 
 <p align="center">
-  <img src="docs/images/preview.gif" width="360" alt="Flyme 小窗交互预览" />
+  <img src="docs/images/preview.gif" width="360" alt="Flyna 交互预览" />
 </p>
 
 ## 功能
@@ -30,6 +30,10 @@
 - **自动暂停**：默认在横屏或游戏模式下暂停增强，退出后自动恢复，可分别关闭。
 
 *更多功能持续开发中。*
+
+## 从旧版迁移
+
+Flyna 的应用包名为 `io.github.mangi.flyna`。安装后需在 LSPosed 中重新启用模块并选择作用域，旧版设置需要重新配置。从旧版切换时，请先停用旧模块，避免同一作用域内重复挂钩。
 
 ## 设计与实现
 

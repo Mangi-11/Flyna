@@ -2,9 +2,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <permission
-        android:name="io.github.mangi.flymefreeform.permission.REQUEST_ENTRY_CATALOG"
+        android:name="${applicationId}.permission.REQUEST_ENTRY_CATALOG"
         android:protectionLevel="signature" />
-    <uses-permission android:name="io.github.mangi.flymefreeform.permission.REQUEST_ENTRY_CATALOG" />
+    <uses-permission android:name="${applicationId}.permission.REQUEST_ENTRY_CATALOG" />
 
     <queries>
         <package android:name="com.coloros.smartsidebar" />
@@ -15,14 +15,14 @@
     </queries>
 
     <application
-        android:name=".FlymeFreeformApplication"
+        android:name=".FlynaApplication"
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.FlymeFreeform">
+        android:theme="@style/Theme.Flyna">
 
         <activity
             android:name=".MainActivity"

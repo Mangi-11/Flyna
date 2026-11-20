@@ -34,7 +34,7 @@ SystemUI 发布只读状态到桌面包；桌面接收器要求发送方拥有 `
 
 包 ClassLoader 就绪后安装 Workspace 适配，并启动一次性后台 Quickstep 解析任务。APK 读取、SHA-256、缓存、native 库加载和查询均在后台执行；DexKit 查询使用一个工作线程，bridge 通过 `use` 释放。
 
-缓存放在桌面自己的 `code_cache/flymefreeform/` 中，只保存消费入口、缓存事件观察入口和单次放行方法名，绑定 APK 内容摘要及规则版本；不保存宿主对象或用户配置。缓存损坏或反射校验失败后只重新解析一次，写缓存失败不阻断已验证目标。
+缓存放在桌面自己的 `code_cache/flyna/` 中，只保存消费入口、缓存事件观察入口和单次放行方法名，绑定 APK 内容摘要及规则版本；不保存宿主对象或用户配置。缓存损坏或反射校验失败后只重新解析一次，写缓存失败不阻断已验证目标。
 
 Quickstep 解析结果回到主线程安装。解析期间的输入继续由桌面处理，安装后只观察新的 `DOWN`。十秒后未完成则放弃安装并请求中断；native 查询本身不保证立即响应 Java 中断，迟到结果不会安装 Hook，返回后释放 bridge。没有热路径扫描、常驻线程池或自动重试。
 
@@ -42,7 +42,7 @@ Quickstep 解析结果回到主线程安装。解析期间的输入继续由桌�
 
 `LauncherSymbolCacheTest` 验证内容变更、规则变更、损坏缓存、旧格式拒绝和原子替换。可选的 `LauncherDexQueryTest` 使用本地宿主 APK、同版本桌面 native 库和人工核对的三个方法名，验证实际查询唯一性及 Workspace 方法声明；未提供环境变量时跳过该项。
 
-环境变量为 `FLYMEFREEFORM_TEST_LAUNCHER_APK`、`FLYMEFREEFORM_TEST_DEXKIT_LIBRARY` 与 `FLYMEFREEFORM_TEST_LAUNCHER_SYMBOLS`（消费入口、缓存观察入口、放行方法名，逗号分隔）。更换输入文件运行时应强制重新执行测试任务，避免 Gradle 复用旧结果。
+环境变量为 `FLYNA_TEST_LAUNCHER_APK`、`FLYNA_TEST_DEXKIT_LIBRARY` 与 `FLYNA_TEST_LAUNCHER_SYMBOLS`（消费入口、缓存观察入口、放行方法名，逗号分隔）。更换输入文件运行时应强制重新执行测试任务，避免 Gradle 复用旧结果。
 
 静态解析和构建通过不代表真实手势已修复。仍需验证空闲桌面和滚动未结束时再次按下、点击/长按、横向翻页、中央上滑、候选让渡、多指、快速重复操作、导航模式变化及停用恢复。尤其 Quickstep 在 `DOWN` 阶段的原有行为继续执行；SystemUI 唯一抢占者与桌面协调是否消除全部竞争，需要真机联合验证。
 

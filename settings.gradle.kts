@@ -22,6 +22,6 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "FlymeFreeform"
+rootProject.name = "Flyna"
 include(":app")
  

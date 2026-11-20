@@ -1,6 +1,6 @@
 # 全部面板
 
-Flyme 小窗是面向 ColorOS 的非官方独立实现，与魅族、Flyme、OPPO 或 ColorOS 无关联。
+Flyna 是面向 ColorOS 的非官方独立实现，与魅族、Flyme、OPPO 或 ColorOS 无关联。
 
 ## 独立窗口与系统内容
 

@@ -4,21 +4,19 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
 }
 
-val flymeFreeformVersionCode = providers.gradleProperty("flymeFreeformVersionCode").get().toInt()
-val flymeFreeformVersionName = providers.gradleProperty("flymeFreeformVersionName").get()
-
 android {
-    namespace = "io.github.mangi.flymefreeform"
+    namespace = "io.github.mangi.flyna"
     compileSdk {
         version = release(37)
     }
 
     defaultConfig {
-        applicationId = "io.github.mangi.flymefreeform"
+        applicationId = "io.github.mangi.flyna"
         minSdk = 35
         targetSdk = 37
-        versionCode = flymeFreeformVersionCode
-        versionName = flymeFreeformVersionName
+        //noinspection HighAppVersionCode
+        versionCode = 2026102502
+        versionName = "0.1.9"
 
         ndk {
             abiFilters += "arm64-v8a"
@@ -58,7 +56,7 @@ androidComponents {
         val suffix = if (variant.buildType == "debug") "-Debug" else ""
         variant.outputs.forEach { output ->
             output.outputFileName.set(
-                output.versionName.map { version -> "FlymeFreeform-v$version$suffix.apk" },
+                output.versionName.map { version -> "Flyna-v$version$suffix.apk" },
             )
         }
     }
