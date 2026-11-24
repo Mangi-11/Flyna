@@ -9,7 +9,7 @@ import org.junit.rules.TemporaryFolder
 
 class LauncherSymbolCacheTest {
     @get:Rule val temporary = TemporaryFolder()
-    private val symbols = LauncherDexQuery.Symbols("input", "intercept", "release")
+    private val symbols = LauncherDexQuery.Symbols("Service", "input", "example.Buffer", "intercept", "release")
 
     @Test fun apkReplacementWithSameSizeAndTimestampInvalidatesCache() {
         val apk = temporary.newFile("host.apk").apply { writeText("first") }
@@ -29,7 +29,10 @@ class LauncherSymbolCacheTest {
         val cache = temporary.newFile("symbols")
         val invalid = listOf(
             "id", "id\ninput()", "id\nexample.input",
-            "id\ninput\nmonitor\nexample.Wrapper\nclaim", "x".repeat(4097),
+            "id\ninput\nintercept\nrelease",
+            "id\ninvalid/Service\ninput\nexample.Buffer\nintercept\nrelease",
+            "id\nService\ninput\nexample.Buffer\nintercept()\nrelease",
+            "x".repeat(4097),
         )
         for (text in invalid) {
             cache.writeText(text)
@@ -42,7 +45,7 @@ class LauncherSymbolCacheTest {
         val cache = directory.resolve("symbols")
         LauncherSymbolCache.write(cache, "old-rule", symbols)
         assertNull(LauncherSymbolCache.read(cache, "new-rule"))
-        val changed = symbols.copy(inputMethod = "renamed")
+        val changed = symbols.copy(inputOwner = "NewService", inputMethod = "renamed")
         LauncherSymbolCache.write(cache, "new-rule", changed)
         assertEquals(changed, LauncherSymbolCache.read(cache, "new-rule"))
         assertEquals(listOf("symbols"), directory.list()!!.toList())

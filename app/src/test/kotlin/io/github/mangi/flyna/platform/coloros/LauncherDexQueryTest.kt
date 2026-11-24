@@ -1,7 +1,8 @@
 package io.github.mangi.flyna.platform.coloros
 
+import android.view.MotionEvent
+import android.view.View
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeNotNull
 import org.junit.Test
 import org.luckypray.dexkit.DexKitBridge
@@ -16,17 +17,39 @@ class LauncherDexQueryTest {
         System.load(nativeLibrary!!)
         val symbols = DexKitBridge.create(apk!!).use { bridge ->
             bridge.setThreadNum(1)
-            val workspace = bridge.getClassData(ColorOsLauncherWorkspaceTarget.WORKSPACE_CLASS)
-                ?: error("LAUNCHER_WORKSPACE_CLASS_MISSING")
-            val methods = workspace.methods
-            val expectedDescriptors = setOf(
-                "Lcom/android/launcher3/OplusWorkspace;->dispatchTouchEvent(Landroid/view/MotionEvent;)Z",
-                "Lcom/android/launcher3/OplusWorkspace;->determineScrollingStart(Landroid/view/MotionEvent;F)V",
-                "Lcom/android/launcher3/OplusWorkspace;->determineScrollingStart(Landroid/view/MotionEvent;FZ)V",
-            )
-            assertTrue(methods.map { it.descriptor }.containsAll(expectedDescriptors))
             LauncherDexQuery.find(bridge)
         }
-        assertEquals(expected, listOf(symbols.inputMethod, symbols.interceptMethod, symbols.releaseMethod).joinToString(","))
+        val actual = listOf(
+            symbols.inputOwner, symbols.inputMethod,
+            symbols.interceptOwner, symbols.interceptMethod, symbols.releaseMethod,
+        )
+        assertEquals(expected, actual.joinToString(","))
+    }
+
+    @Test fun workspaceUsesTheMotionEventArgumentOnBothHostGenerations() {
+        val legacy = resolveWorkspace(LegacyWorkspace::class.java)
+        assertEquals(listOf(0, 0), legacy.scrollingStarts.map { it.eventIndex })
+        val current = resolveWorkspace(CurrentWorkspace::class.java)
+        assertEquals(listOf(0, 1), current.scrollingStarts.map { it.eventIndex })
+    }
+
+    private fun resolveWorkspace(workspace: Class<out View>) =
+        ColorOsLauncherWorkspaceTarget.resolve(object : ClassLoader(workspace.classLoader) {
+            override fun loadClass(name: String): Class<*> =
+                if (name == ColorOsLauncherWorkspaceTarget.WORKSPACE_CLASS) workspace else super.loadClass(name)
+        })
+
+    @Suppress("unused", "UNUSED_PARAMETER")
+    private class LegacyWorkspace : View(null) {
+        override fun dispatchTouchEvent(event: MotionEvent): Boolean = false
+        fun determineScrollingStart(event: MotionEvent, threshold: Float) = Unit
+        fun determineScrollingStart(event: MotionEvent, threshold: Float, flag: Boolean) = Unit
+    }
+
+    @Suppress("unused", "UNUSED_PARAMETER")
+    private class CurrentWorkspace : View(null) {
+        override fun dispatchTouchEvent(event: MotionEvent): Boolean = false
+        fun determineScrollingStart(event: MotionEvent) = Unit
+        fun determineScrollingStart(threshold: Float, event: MotionEvent) = Unit
     }
 }

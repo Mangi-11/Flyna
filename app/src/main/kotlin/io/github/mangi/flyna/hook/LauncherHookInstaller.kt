@@ -185,15 +185,15 @@ internal class LauncherHookInstaller(
                     // 只记录输入，不消费普通 View 的 DOWN、点击、长按或终止事件。
                     chain.proceed()
                 }
-            target.scrollingStarts.forEachIndexed { index, method ->
+            target.scrollingStarts.forEachIndexed { index, start ->
                 handles += module
-                    .hook(method)
+                    .hook(start.method)
                     .setPriority(XposedInterface.PRIORITY_HIGHEST)
                     .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
                     .setId("flyna.launcher.workspace_scroll_gate_$index")
                     .intercept { chain ->
                         val owner = chain.thisObject as? View
-                        val event = chain.getArg(0) as? MotionEvent
+                        val event = chain.getArg(start.eventIndex) as? MotionEvent
                         val defer = workspaceHooksReady && owner != null && event != null &&
                             synchronized(streamLock) {
                                 val stream = workspaceStreams[owner]

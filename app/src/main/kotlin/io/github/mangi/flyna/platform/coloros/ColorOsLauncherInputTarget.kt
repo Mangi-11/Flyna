@@ -1,7 +1,7 @@
 package io.github.mangi.flyna.platform.coloros
 
 import android.annotation.SuppressLint
-import android.content.Context
+import android.app.Service
 import android.view.MotionEvent
 import java.io.File
 import java.io.IOException
@@ -57,24 +57,28 @@ internal data class ColorOsLauncherInputTarget(
         @SuppressLint("PrivateApi")
         private fun bind(loader: ClassLoader, symbols: LauncherDexQuery.Symbols): ColorOsLauncherInputTarget {
             val service = loader.loadClass(LauncherDexQuery.SERVICE_CLASS)
-            require(Context::class.java.isAssignableFrom(service))
-            val input = service.getDeclaredMethod(symbols.inputMethod, MotionEvent::class.java)
-            require(input.returnType == Void.TYPE && !Modifier.isStatic(input.modifiers))
+            val inputOwner = loader.loadClass(symbols.inputOwner)
+            require(Service::class.java.isAssignableFrom(inputOwner) && inputOwner.isAssignableFrom(service))
+            val input = inputOwner.getDeclaredMethod(symbols.inputMethod, MotionEvent::class.java)
+            require(input.returnType == Void.TYPE && input.isConcreteInstanceMethod)
             input.isAccessible = true
-            val helper = loader.loadClass(LauncherDexQuery.INTERCEPT_CLASS)
+            val helper = loader.loadClass(symbols.interceptOwner)
             val intercept = helper.declaredMethods.singleOrNull { method ->
                 val types = method.parameterTypes
                 method.name == symbols.interceptMethod && method.returnType == Boolean::class.javaPrimitiveType &&
-                    !Modifier.isStatic(method.modifiers) && types.size == 7 &&
+                    method.isConcreteInstanceMethod && types.size == 7 &&
                     types[0] == MotionEvent::class.java && types[1] == Boolean::class.javaPrimitiveType &&
                     types[2] == java.lang.Float::class.java && types[3] == Boolean::class.javaPrimitiveType &&
                     types[4] == Boolean::class.javaPrimitiveType && !types[5].isPrimitive && types[6] == String::class.java
             } ?: throw NoSuchMethodException("Input interception signature mismatch")
             val release = helper.getDeclaredMethod(symbols.releaseMethod, Boolean::class.javaPrimitiveType)
-            require(release.returnType == Void.TYPE && !Modifier.isStatic(release.modifiers))
+            require(release.returnType == Void.TYPE && release.isConcreteInstanceMethod)
             intercept.isAccessible = true
             release.isAccessible = true
             return ColorOsLauncherInputTarget(input, intercept, release)
         }
     }
 }
+
+private val Method.isConcreteInstanceMethod: Boolean
+    get() = !Modifier.isStatic(modifiers) && !Modifier.isAbstract(modifiers)
